@@ -1,0 +1,10 @@
+[project]
+name = "refundo"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "deepagents>=0.7.21",
+    "langsmith>=0.14.4",
+]
