@@ -15,5 +15,10 @@ wheels/
 # Built slides
 deck/*.html
 
-# Private prep notes for the presentation
+# Local notes
 deck/prep-notes.md
+
+# Local inputs for the process transcripts
+process/*.local.*
+process/earlier-chat.txt
+process/convert_earlier_chat.py
