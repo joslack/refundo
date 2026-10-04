@@ -11,3 +11,9 @@ dist/
 wheels/
 *.egg-info/
 
+
+# Built slides
+deck/*.html
+
+# Private prep notes for the presentation
+deck/prep-notes.md
