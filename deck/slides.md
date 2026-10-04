@@ -233,7 +233,7 @@ An oracle baseline sits beside the ladder: the rules engine given perfect facts.
 <span class="small">First row is a draft until the agent is built.</span>
 
 <!--
-Be ready for pushback on each row. The labeling-tool row is also a friction log item.
+The labeling-tool row is also a friction log item.
 -->
 
 ---
@@ -330,7 +330,7 @@ Offline evaluation justifies the launch at a zero threshold. Only production evi
 | **Guardrails** | Records and messages are untrusted input. Escalations, unauthorized requesters and suspected injection are never automated. |
 
 <!--
-Detail to have ready: Stripe idempotency keys expire after about a day, so a reviewer approving the next morning can't rely on the key alone. And refunds should be issued as credit notes on the invoice so tax is reversed with them.
+More detail: Stripe idempotency keys expire after about a day, so a reviewer approving the next morning can't rely on the key alone. And refunds should be issued as credit notes on the invoice so tax is reversed with them.
 
 Out of scope and worth a mention: defending chargebacks.
 -->
