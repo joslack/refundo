@@ -4,8 +4,9 @@
 
 Reads the Harbor job folders in evals/jobs/ whose names carry the given commit (the one evals/run.py put in
 each job's name) and writes, to evals/results/<commit>/:
-    results.csv      one row per experiment: scores, calls, tokens, cost per case
-    cases.csv        one row per trial: what was proposed, how it scored, calls, tokens, cost
+    results.csv      one row per experiment: scores, calls, seconds, tokens, cost per case
+    cases.csv        one row per trial: what was proposed, how it scored, calls, seconds, tokens, cost
+    misses.csv       one row per case and experiment with a wrong trial: what was expected and what was given
     pareto.png       reward against cost per case, one line per agent and model across its reasoning efforts
     pareto-top.png   the same, zoomed on the experiments that are cheap and at least 80% right
     index.png        reward against the Artificial Analysis Intelligence Index for the same model and effort
@@ -15,14 +16,20 @@ and the amount were both right. Where each case was run more than once (`run.py 
 trials, and results.csv also says how far a single run's score would stray from it (reward_sd) and how many cases
 were right every time, some of the time, and never. Cost per case is the experiment's tokens at the provider's
 list price, divided by the number of trials. The charts show experiments that have every case, the same number of
-times. If evals/latency.py has written latency.csv beside them, its estimate of the seconds a case spent in
-model calls is added to results.csv.
+times.
+
+Seconds per case is the median time the agent took, from its first model call to its reply, as Harbor timed it.
+It compares experiments that ran under the same load, and is left blank for a job whose model calls were paced,
+because the waits are in it. If evals/latency.py has written latency.csv beside the tables, its estimate of the
+seconds a case spent in model calls is added to results.csv.
 """
 
 import csv
 import json
 import re
 import sys
+from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from statistics import median
 
@@ -36,7 +43,9 @@ from matplotlib.transforms import Bbox  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from world.labeling import LABELS, load_labels  # noqa: E402
+from world.labeling import LABELS, load_labels, ui_action  # noqa: E402
+from world.oracle import label  # noqa: E402
+from world.scenarios import ALL  # noqa: E402
 
 JOBS = ROOT / "evals/jobs"
 OUT = ROOT / "evals/results"
@@ -111,6 +120,8 @@ def trials_of(job: Path, model: str) -> list[dict]:
         write = sum(((m.get("usage_metadata") or {}).get("input_token_details") or {}).get("cache_creation") or 0
                     for m in messages if m.get("type") == "ai")
         submitted = read_json(path.parent / "artifacts/tmp/proposals.json") or []
+        ran = trial.get("agent_execution") or {}
+        timed = ran.get("started_at") and ran.get("finished_at")
         rows.append({
             "case": trial["task_name"].split("/")[-1], "trial": trial["trial_name"],
             "right": scores.get("reward") == 1.0, "action": scores.get("action") == 1.0,
@@ -119,6 +130,8 @@ def trials_of(job: Path, model: str) -> list[dict]:
             "error": (trial.get("exception_info") or {}).get("exception_type", ""),
             "model_calls": sum(m.get("type") == "ai" for m in messages),
             "tool_calls": sum(m.get("type") == "tool" for m in messages),
+            "agent_seconds": round((datetime.fromisoformat(ran["finished_at"])
+                                    - datetime.fromisoformat(ran["started_at"])).total_seconds(), 1) if timed else "",
             "input_tokens": tokens_in, "cached_tokens": read, "cache_write_tokens": write, "output_tokens": out,
             "cost_usd": ((tokens_in - read - write) * price_in + read * price_read + write * price_write
                          + out * price_out) / 1e6,
@@ -149,6 +162,9 @@ def experiments(commit: str) -> list[dict]:
         times = {len(v) for v in by_case.values()}
         rates = [sum(v) / len(v) for v in by_case.values()]
         repeated = times != {1}
+        settings = ((read_json(job / "config.json") or {}).get("agents") or [{}])[0].get("kwargs") or {}
+        paced = bool((settings.get("configurable") or {}).get("calls_per_minute"))
+        seconds = [t["agent_seconds"] for t in trials if t["agent_seconds"] != ""]
         row = {
             "graph": graph, "model": model, "effort": effort,
             "effective_effort": DEFAULT_EFFORT.get(model, "default") if effort == "default" else effort,
@@ -167,6 +183,7 @@ def experiments(commit: str) -> list[dict]:
             "no_proposal": sum(t["proposal"] is None for t in trials), "errored": sum(t["errored"] for t in trials),
             "model_calls_per_case": round(sum(t["model_calls"] for t in trials) / len(trials), 1),
             "tool_calls_per_case": round(sum(t["tool_calls"] for t in trials) / len(trials), 1),
+            "agent_seconds_per_case": round(median(seconds), 1) if seconds and not paced else "",
             "input_tokens": sum(t["input_tokens"] for t in trials), "cached_tokens": sum(t["cached_tokens"] for t in trials),
             "cache_write_tokens": sum(t["cache_write_tokens"] for t in trials),
             "output_tokens": sum(t["output_tokens"] for t in trials),
@@ -382,8 +399,32 @@ def in_order(rows: list[dict]) -> list[dict]:
                                        EFFORTS.index(r["effective_effort"]) if r["effective_effort"] in EFFORTS else 0))
 
 
+def misses(rows: list[dict]) -> list[dict]:
+    """One row per case and experiment where a trial was wrong, with the oracle's answer and what was given."""
+    expected = {}
+    for scenario in ALL:
+        oracle = label(scenario.world, scenario.request)
+        owed = oracle.proposed.amount_cents if oracle.proposed else oracle.amount_cents
+        expected[scenario.id.lower()] = (ui_action(oracle.action.value), owed or 0)
+    out = []
+    for r in in_order(rows):
+        by_case: dict[str, list[dict]] = {}
+        for t in r["cases"]:
+            by_case.setdefault(t["case"], []).append(t)
+        for case, trials in sorted(by_case.items()):
+            wrong = [t["proposal"] for t in trials if not t["right"]]
+            if not wrong:
+                continue
+            given = Counter(f"{p['action']} {p['amount_cents'] or 0}" if p else "nothing" for p in wrong)
+            out.append({"case": case, "graph": r["graph"], "model": r["model"], "effort": r["effort"],
+                        "right": len(trials) - len(wrong), "trials": len(trials),
+                        "expected_action": expected[case][0], "expected_amount_cents": expected[case][1],
+                        "given": "; ".join(f"{answer} ({n})" for answer, n in given.most_common())})
+    return sorted(out, key=lambda m: m["case"])
+
+
 def write_csv(rows: list[dict], folder: Path) -> None:
-    """results.csv and cases.csv. latency.csv, where evals/latency.py has written it, adds a column."""
+    """results.csv, cases.csv and misses.csv. latency.csv, where evals/latency.py has written it, adds a column."""
     latency = {}
     if (folder / "latency.csv").exists():
         with (folder / "latency.csv").open() as f:
@@ -395,7 +436,7 @@ def write_csv(rows: list[dict], folder: Path) -> None:
         writer.writeheader()
         writer.writerows(in_order(rows))
     columns = ["graph", "model", "effort", "case", "trial", "right", "action", "amount", "sections", "proposed_action",
-               "proposed_amount_cents", "error", "model_calls", "tool_calls", "input_tokens", "cached_tokens",
+               "proposed_amount_cents", "error", "model_calls", "tool_calls", "agent_seconds", "input_tokens", "cached_tokens",
                "cache_write_tokens", "output_tokens", "cost_usd"]
     with (folder / "cases.csv").open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
@@ -407,6 +448,12 @@ def write_csv(rows: list[dict], folder: Path) -> None:
                                      "cost_usd": round(t["cost_usd"], 6),
                                      "proposed_action": proposed.get("action", ""),
                                      "proposed_amount_cents": proposed.get("amount_cents", "")})
+    missed = misses(rows)
+    with (folder / "misses.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["case", "graph", "model", "effort", "right", "trials", "expected_action",
+                                               "expected_amount_cents", "given"])
+        writer.writeheader()
+        writer.writerows(missed)
 
 
 if __name__ == "__main__":
@@ -422,6 +469,7 @@ if __name__ == "__main__":
     for r in sorted(rows, key=lambda r: (-r["reward"], r["cost_per_case_usd"])):
         spread = "" if r["reward_sd"] == "" else f" (sd {r['reward_sd']})"
         print(f"{r['graph']:11} {NAMES[r['model']]:24} {r['effort']:8} reward {r['reward']:5.1f}%{spread}"
-              f"  cost/case ${r['cost_per_case_usd']:.4f}  trials {r['trials']:3}{'' if r['complete'] else ' (not every case)'}"
+              f"  cost/case ${r['cost_per_case_usd']:.4f}  tool calls {r['tool_calls_per_case']:4}  seconds {r['agent_seconds_per_case']:>5}"
+              f"  trials {r['trials']:3}{'' if r['complete'] else ' (not every case)'}"
               f"  no proposal {r['no_proposal']:2}  errored {r['errored']:2}")
     print(f"{len(rows)} experiments; rank correlation with the Artificial Analysis index: {found}")
