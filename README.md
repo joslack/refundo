@@ -26,7 +26,7 @@ uv run python evals/run.py sql             # the agent graph `sql` on the defaul
 uv run python evals/run.py sql -m all --efforts all   # every model in run.py at each reasoning effort it accepts
 uv run python evals/run.py sql,structured -m deepseek:medium,luna:high,glm:high -k 5   # two graphs, each model at one reasoning effort, each case five times, so a score does not rest on one run
 uv run --with matplotlib python evals/pareto.py a3dd364   # that sweep's tables and charts, in evals/results/a3dd364/
-uv run --env-file .env python evals/latency.py a3dd364   # estimated seconds in model calls per case, from the LangSmith traces
+uv run --env-file .env python evals/latency.py a3dd364 quillstack-refund-requests   # estimated seconds in model calls per case, from the LangSmith traces
 ```
 
 The dataset is all 80 scenarios. In LangSmith each one is marked hand-labeled or unlabeled, so results can be read for either group.

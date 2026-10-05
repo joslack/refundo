@@ -37,7 +37,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 JOBS = HERE / "jobs"
-DATASET = "quillstack-refund-requests"
+# The name carries a version. Every experiment in a dataset is graded against one answer key and sees one
+# description of the submit tool, so a change to either gets a new name.
+DATASET = "quillstack-refund-requests-v2"
 FIREWORKS = "fireworks/accounts/fireworks/models/"
 # Short name -> (model id as Harbor expects it, the reasoning efforts the model accepts). Checked 2026-10-05.
 MODELS = {
