@@ -24,7 +24,7 @@ uv run python evals/build.py               # build the shared images and the Har
 uv run python evals/run.py oracle          # the reference solution on every task; it should score 1.0 everywhere
 uv run python evals/run.py sql             # the agent graph `sql` on the default model, recorded in LangSmith as an experiment
 uv run python evals/run.py sql -m all --efforts all   # every model in run.py at each reasoning effort it accepts
-uv run python evals/run.py structured -m deepseek,luna,glm -k 5   # another graph, each case five times, so a score does not rest on one run
+uv run python evals/run.py sql,structured -m deepseek:medium,luna:high,glm:high -k 5   # two graphs, each model at one reasoning effort, each case five times, so a score does not rest on one run
 uv run --with matplotlib python evals/pareto.py a3dd364   # that sweep's tables and charts, in evals/results/a3dd364/
 uv run --env-file .env python evals/latency.py a3dd364   # estimated seconds in model calls per case, from the LangSmith traces
 ```
