@@ -99,6 +99,12 @@ def calls_per_minute(model: str, effort: str | None, extra: list[str]) -> float 
     return round(0.9 * limit / TOKENS_PER_CALL.get(effort, TOKENS_PER_CALL[None]) / trials, 1)
 
 
+def plugin_settings(**settings) -> list[str]:
+    """Settings for the plugin, each written as JSON. Harbor reads a bare value as a number where it can, and
+    the commit 61e1870 came out as infinity."""
+    return [arg for key, value in settings.items() for arg in ("--pk", f"{key}={json.dumps(value)}")]
+
+
 def agent_command(graph: str, model: str, effort: str | None, agents: Path, commit: str, extra: list[str]) -> list[str]:
     short = model.split("/")[-1]
     stamp = datetime.now().strftime("%m%d-%H%M%S")
@@ -110,9 +116,9 @@ def agent_command(graph: str, model: str, effort: str | None, agents: Path, comm
     return harbor(extra) + [
         "-a", "langgraph", "-m", model, "--ak", f"project_path={agents}", "--ak", f"graph={graph}", *settings,
         "--env-file", str(ROOT / ".env"), "--max-retries", "2", *patience,
-        "--plugin", "evals.langsmith_plugin:Annotated", "--pk", f"dataset_name={DATASET}",
-        "--pk", f"graph={graph}", "--pk", f"model={short}", "--pk", f"reasoning_effort={effort or 'default'}",
-        "--pk", f"commit={commit}", "--pk", "tools=" + json.dumps(tools_of(graph, agents)),
+        "--plugin", "evals.langsmith_plugin:Annotated", *plugin_settings(
+            dataset_name=DATASET, graph=graph, model=short, reasoning_effort=effort or "default", commit=commit,
+            tools=tools_of(graph, agents)),
         "--job-name", f"{graph}-{short}-{effort or 'default'}-{commit}-{stamp}"] + extra
 
 
