@@ -30,7 +30,7 @@ Every way the scenarios should exercise the Quillstack refund policy. Each row b
 | ESC-02 | A dispute is open on a different charge, not the one in question | Proceed normally; the dispute is a distractor | 5 | H |
 | ESC-03a | A dispute on the charge closed in the customer's favor (Stripe status `lost`) | Deny; the bank already returned the money | 3 | H |
 | ESC-03b | A dispute on the charge closed in Quillstack's favor (Stripe status `won`) | Escalate | 11 | H |
-| ESC-04 | The Workspace is suspended for a ToS violation | Escalate; nothing is proposed, since §3 allows no refunds or credits | 11 | E |
+| ESC-04 | The Workspace is suspended for a ToS violation | Escalate; the note carries the $80 that §5 would grant | 11 | E |
 | ESC-05 | The Workspace is suspended for nonpayment, not ToS | Proceed normally | 5 | H |
 | ESC-06 | A first annual Business purchase, no Usage, within 30 days; the refund is over $500 | Escalate; note proposes the full refund | 11 | M |
 | ESC-07a | The amount owed is exactly $500.00 | Refund; the cap is "exceeds" | 6 | H |
@@ -179,7 +179,7 @@ Settled on 2026-10-03, from hand-labeling:
 | AN-02, AN-06 | Proration is for the days remaining in the Billing Period, not the days without Usage (§6). |
 | ESC-12 | A completed cancellation is cross-checked between the app event log and the billing system (§2). |
 | BE-15 | A promise the customer says was made outside a ticket escalates (§11). |
-| ESC-04 | A ToS suspension escalates with nothing proposed (§3). |
+| ESC-04 | A ToS suspension escalates like an open dispute: the note carries the outcome of step 2 (§1). |
 | BE-19 | Each charge a request describes is decided separately (§4). |
 | BE-16 | A written promise larger than the charge's Amount Paid escalates (§11). |
 | ESC-01, ESC-03b | A dispute escalation still proposes what the rules would otherwise grant. |

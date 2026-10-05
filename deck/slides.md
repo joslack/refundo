@@ -129,20 +129,20 @@ Where I disagree with it, either I made a mistake, there's a bug in the oracle, 
 | | |
 |---|---|
 | Cases labeled | 41 of 80: 32 blind, then 9 chosen so each kind of outcome was checked |
-| First pass, same action and amount as the answer key | 31 of 41 |
-| First pass, sections also complete | 24 of 41 |
+| First pass, same action and amount as the answer key | 30 of 41 |
+| First pass, sections also complete | 23 of 41 |
 | My misses on the outcome | 7 |
-| Gaps in the policy's wording | 3 |
+| Gaps in the policy's wording | 4 |
 | Incomplete citations, or the form's wording | 7 |
-| Oracle bugs found by labeling | 2 |
+| Oracle bugs found by labeling | 1 |
 | Median time per case | 2 minutes 45 seconds |
 
-After the rulings and 17 corrected labels, all 41 agree. The first-pass rows are measured against the answer key as it is now.
+After the rulings and 18 corrected labels, all 41 agree. The first-pass rows are measured against the answer key as it is now.
 
 <!--
 I labeled 41 of the 80 cases. The first 32 were blind. The last nine I chose so that each kind of outcome the oracle can produce had been checked by a person. Of 31 kinds, 26 have a hand-labeled case. Four were settled by a ruling, and one case was written after I stopped labeling.
 
-Measured against the answer key as it is now, 31 of my first-pass labels had the right action and amount, and 24 also named every section the outcome rests on. I corrected 17. Seven were my own misses on the outcome, all on hard cases. Three were places where the policy's wording was ambiguous or silent. Seven were citations: mostly a monthly denial where I named one of the two sections it rests on. Separately, labeling found two bugs in the oracle, where my label was right.
+Measured against the answer key as it is now, 30 of my first-pass labels had the right action and amount, and 23 also named every section the outcome rests on. I corrected 18. Seven were my own misses on the outcome, all on hard cases. Four were places where the policy's wording was ambiguous or silent. Seven were citations: mostly a monthly denial where I named one of the two sections it rests on. Separately, labeling found one bug in the oracle, where my label was right.
 
 All 41 agree now, but that is weaker evidence, because the labels and the oracle were adjusted to each other.
 

@@ -253,12 +253,6 @@ def decide(f: Facts) -> Outcome:
         c.add("The requester is not the Owner or a Billing Admin at the Request Time.", "requester", ("members",))
         return _out(c, Action.NO_ACTION, 0, "3", "The requester is not the Owner or a Billing Admin.")
     c.add("The requester is the Owner or a Billing Admin at the Request Time.", "requester")
-    if f.tos_suspended:  # §3: no refunds or credits, so there is nothing to work out before escalating
-        c.add("The Workspace is suspended for a terms-of-service violation.", "suspension", need="any")
-        out = _out(c, Action.ESCALATE, 0, "11", "Escalate: the Workspace is suspended for a terms-of-service violation.")
-        out.proposed = Outcome(action=Action.DENY, section="3",
-                               rationale="No refunds or credits for a Workspace suspended for a terms-of-service violation.")
-        return out
     c.add(f"The charge in question is {f.invoice_id}, with Amount Paid of ${f.amount_paid / 100:,.2f} before tax.",
           records=[f.invoice_id])
     if f.dispute == "none":
@@ -289,7 +283,12 @@ def decide(f: Facts) -> Outcome:
         reasons.append("a dispute is open on the charge")
     if f.dispute == "quillstack_won":
         reasons.append("a dispute on the charge closed in Quillstack's favor")
-    c.add("The Workspace is not suspended for a terms-of-service violation.", "workspace", rule_out=True)
+    # §1 step 3 names the suspension beside the open dispute: escalate, and the note carries the outcome from step 2.
+    if f.tos_suspended:
+        reasons.append("the Workspace is suspended for a terms-of-service violation")
+        c.add("The Workspace is suspended for a terms-of-service violation.", "suspension", need="any")
+    else:
+        c.add("The Workspace is not suspended for a terms-of-service violation.", "workspace", rule_out=True)
     if f.mentions_legal:
         reasons.append("the customer mentions legal action or a regulator")
         c.add("The customer mentions legal action, a lawyer, or a regulator.", records=["request"])
