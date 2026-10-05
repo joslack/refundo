@@ -12,18 +12,6 @@ def ask(b, invoice, after_days):
     return b.build(), request
 
 
-def test_a_promise_already_paid_is_not_paid_again():
-    b, inv = team()
-    b.ticket("Outage", DANA, RENEWAL + days(1), [
-        (DANA, "We want compensation."),
-        ("support:Lena Fischer", "I've approved a refund of $40.", {"promise_cents": 4000}),
-    ])
-    b.refund(inv, RENEWAL + days(3), amount=4000, basis="billing_error")
-    b.session(MARCUS, RENEWAL + days(2))
-    outcome = label(*ask(b, inv, 15))
-    assert (outcome.action, outcome.amount_cents) == (Action.DENY, 0)
-
-
 def test_a_duplicate_invoice_is_not_an_extra_month_for_goodwill():
     b, inv = team(months=5)
     august = add_months(RENEWAL, -1)

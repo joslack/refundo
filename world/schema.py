@@ -22,7 +22,6 @@ class Tier(StrEnum):
     STARTER = "starter"
     TEAM = "team"
     BUSINESS = "business"
-    PRO = "pro"  # retired 2025-07-01 (policy §13); only appears in old history
 
 
 class Interval(StrEnum):
@@ -56,14 +55,13 @@ class PlanPeriod(BaseModel):
     interval: Interval
     seats: int
     effective_at: AwareDatetime
-    migrated_from: Tier | None = None  # shown as "Team (migrated from Pro)"
 
 
 class Workspace(BaseModel):
     id: str  # ws_...
     name: str  # customer-controlled, so an injection surface
     created_at: AwareDatetime
-    status: Literal["trialing", "active", "canceled", "suspended"]
+    status: Literal["active", "canceled", "suspended"]
     suspension_reason: Literal["tos_violation", "nonpayment"] | None = None
     stripe_customer_id: str
     plan_history: list[PlanPeriod]
@@ -78,16 +76,15 @@ class InvoiceLine(BaseModel):
     interval: Interval
     seats: int
     amount: int  # cents, before discounts and tax
-    proration: bool = False  # true on mid-period upgrade charges
 
 
 class Invoice(BaseModel):
     id: str  # in_...
     customer: str  # Stripe customer id
     billing_reason: Literal[
-        "subscription_create",  # first charge, including trial conversions
+        "subscription_create",  # the first charge of a subscription
         "subscription_cycle",  # a renewal; `created` is the Renewal Timestamp
-        "subscription_update",  # mid-period upgrade
+        "subscription_update",  # a plan change that starts a new term, such as monthly to annual
         "manual",
     ]
     created: AwareDatetime
@@ -107,7 +104,7 @@ class Invoice(BaseModel):
 class Subscription(BaseModel):
     id: str  # sub_...
     customer: str
-    status: Literal["trialing", "active", "canceled"]
+    status: Literal["active", "canceled"]
     current_period_start: AwareDatetime
     current_period_end: AwareDatetime
     canceled_at: AwareDatetime | None = None  # Stripe's own record of when the cancellation took effect
@@ -161,9 +158,6 @@ class AppEvent(BaseModel):
     workspace_id: str
     at: AwareDatetime
     type: Literal[
-        "trial_started",
-        "trial_reminder_sent",
-        "trial_converted",
         "cancellation_requested",
         "cancellation_completed",
         "cancellation_failed",

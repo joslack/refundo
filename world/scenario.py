@@ -61,6 +61,7 @@ class Outcome(BaseModel):
     form: Literal["cash", "credit"] | None = None
     section: str  # governing policy section, e.g. "4.2", "6", "11"
     considered: list[str] = []  # every section the decision had to consult, in order
+    must_cite: list[str] = []  # the sections a correct label has to name: usually just `section`
     rationale: str  # one sentence a reviewer can check against the records
     records: list[str] = []  # ids of the records the decision rests on
     evidence: list[Evidence] = []  # the assertions behind the decision, each with its support

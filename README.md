@@ -6,7 +6,7 @@ A refund agent for Quillstack, a fictional subscription software company, and th
 
 | Path | What it holds |
 |---|---|
-| `world/` | The test world: record schema, scenario builders, 79 scenarios, the oracle, the labeling UI and the hand labels |
+| `world/` | The test world: record schema, scenario builders, 80 scenarios, the oracle, the labeling UI and the hand labels |
 | `agent/` | The agent (not built yet). It imports nothing from `world/`; `tests/test_boundaries.py` enforces that |
 | `mcp_server/` | The tools the agent uses to read records (not built yet) |
 | `evals/` | Harbor tasks and the verifier (not built yet) |
@@ -18,6 +18,14 @@ A refund agent for Quillstack, a fictional subscription software company, and th
 
 ```
 uv sync                                    # install
-uv run pytest                              # scenarios against the oracle, plus regression tests
+uv run pytest                              # scenarios, policy counterexamples and hand labels against the oracle
+uv run python -m world.labeling            # how the hand labels compare with the oracle
 uv run streamlit run world/label_app.py    # labeling UI
 ```
+
+## What the answer key covers
+
+- The oracle (`world/oracle.py`) implements every decision rule in `docs/policy.md`: §3, 4, 5, 6, 9, 10 and 11. §12, which governs how replies are written, is not evaluated yet.
+- All 80 scenarios are checked against the oracle by tests. The scenarios and the oracle were written together, so that shows they are consistent, not that they are right.
+- 41 of the 80 scenarios were also labeled by hand, 32 of them blind. The other 39 have no hand label.
+- `tests/test_policy_invariants.py` holds cases written from the policy text alone, independent of the scenarios.
