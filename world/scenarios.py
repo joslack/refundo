@@ -164,7 +164,7 @@ b, inv = team()
 b.suspend(RENEWAL + days(1), "tos_violation")
 add("ESC-04", "E", ["3", "11"], "The Workspace is suspended for a ToS violation.", b, DANA, RENEWAL + days(2),
     "You suspended our account the day after charging us. I want the $80 back.",
-    inv, ESCALATE, section="11", proposed=0)
+    inv, ESCALATE, section="11", proposed=8000)
 
 b, inv = team()
 b.event("workspace_suspended", RENEWAL - days(40), reason="nonpayment")

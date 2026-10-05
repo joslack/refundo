@@ -8,10 +8,19 @@ trial as a run in a LangSmith experiment, with the agent's own trace nested unde
   read. Group by offers only the first ten metadata keys in alphabetical order, and Harbor's own keys
   would fill them, so a run carries these ten and no others. A run cannot be given metadata afterwards.
 - On each dataset example: the oracle's outcome as the reference output, and the same labels.
-- On the experiment: the graph, model, reasoning effort, commit and tools.
+- On the experiment: the graph, model, reasoning effort, commit and tools, and whether its model calls were paced.
 - On each trial's run: what the agent proposed and what it told the customer, at the top of the output.
 - On a missed case: a comment on the reward score saying what was expected.
+- Three more scores per trial: tool_calls, model_calls and agent_seconds.
 - The experiment's end time in UTC. Harbor hands the plugin a local time with no zone.
+
+It also changes two things Harbor's plugin does:
+
+- Tokens are counted once. Harbor adds a model run to each trial holding the trial's token total, for
+  agents that leave no trace. This agent's trace already carries every call's tokens, and LangSmith
+  adds the two together.
+- A trial Harbor runs again gets a run of its own. Harbor reuses the trial's name, the plugin makes the
+  run's id from that name, and LangSmith accepts one result per run, so the second result was lost.
 
 It overrides methods of harbor-langsmith 0.3.1 that are not a public interface, so check it when Harbor
 is updated.
@@ -24,6 +33,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from harbor.trial.hooks import TrialEvent
 from harbor_langsmith.plugin import LangSmithPlugin
 
 from world.labeling import LABELS, load_labels, ui_action
@@ -60,13 +70,29 @@ def proposal(result) -> dict | None:
     return {k: submitted[-1].get(k) for k in ("action", "amount_cents", "sections", "rationale")} if submitted else None
 
 
+def messages(result) -> list[dict]:
+    """The conversation the agent left behind: one "ai" message per model call, one "tool" message per tool call."""
+    try:
+        return json.loads((trial_folder(result) / "agent/result.json").read_text())["messages"]
+    except (OSError, ValueError, KeyError):
+        return []
+
+
+def measures(result) -> dict[str, float]:
+    """What the trial cost in calls and time, as scores beside the grader's."""
+    said = messages(result)
+    out = {}
+    if said:
+        out = {"tool_calls": sum(m.get("type") == "tool" for m in said), "model_calls": sum(m.get("type") == "ai" for m in said)}
+    ran = result.agent_execution
+    if ran and ran.started_at and ran.finished_at:
+        out["agent_seconds"] = round((ran.finished_at - ran.started_at).total_seconds(), 1)
+    return out
+
+
 def reply(result) -> str | None:
     """The agent's last message to the customer, as text whichever way the model's API shapes it."""
-    try:
-        messages = json.loads((trial_folder(result) / "agent/result.json").read_text())["messages"]
-    except (OSError, ValueError, KeyError):
-        return None
-    content = next((m.get("content") for m in reversed(messages) if m.get("type") == "ai"), None)
+    content = next((m.get("content") for m in reversed(messages(result)) if m.get("type") == "ai"), None)
     if isinstance(content, list):
         content = "".join(block.get("text", "") for block in content if isinstance(block, dict))
     return content or None
@@ -74,12 +100,41 @@ def reply(result) -> str | None:
 
 class Annotated(LangSmithPlugin):
     def __init__(self, *, graph: str | None = None, model: str | None = None, reasoning_effort: str | None = None,
-                 commit: str | None = None, tools: list[str] | None = None, **kwargs: Any):
+                 commit: str | None = None, tools: list[str] | None = None, paced: bool = False, **kwargs: Any):
         super().__init__(**kwargs)
         # LangSmith's experiment table has Models and Tools columns that read the plural keys.
         self._about = {"graph": graph, "model": model, "models": [model], "reasoning_effort": reasoning_effort,
-                       "commit": commit, "tools": tools or []}
+                       "commit": commit, "tools": tools or [], "paced": paced}
         self._trial = threading.local()  # trials finish on separate threads
+        self._lock = threading.Lock()
+        self._ended: set[str] = set()  # trials that have finished once
+        self._again: dict[str, int] = {}  # how many times Harbor has started each of them again
+
+    def _handle_event_sync(self, event) -> None:
+        name = event.config.trial_name
+        with self._lock:
+            if event.event == TrialEvent.START and name in self._ended:
+                self._again[name] = self._again.get(name, 0) + 1
+        super()._handle_event_sync(event)
+        if event.event in {TrialEvent.END, TrialEvent.CANCEL}:
+            with self._lock:
+                self._ended.add(name)
+
+    def _stable_uuid(self, *parts: Any) -> str:
+        """Harbor's ids, with the retry number added for a trial that is being run again."""
+        with self._lock:
+            again = next((self._again[p] for p in parts if isinstance(p, str) and p in self._again), 0)
+        return LangSmithPlugin._stable_uuid(*parts, *([f"retry-{again}"] if again else []))
+
+    def _emit_usage_run(self, event, parent_run_id: str, usage_metadata: dict[str, Any]) -> None:
+        """Nothing: the agent's trace under the trial already holds every call's tokens."""
+
+    def _create_feedback(self, run_id: str, result: Any) -> None:
+        super()._create_feedback(run_id, result)
+        for key, score in measures(result).items():
+            self._request("POST", "/feedback", ok_statuses={200, 201, 409}, json={
+                "id": self._stable_uuid(run_id, "feedback", key), "run_id": run_id, "key": key, "score": score,
+                "feedback_source_type": "api"})
 
     def _request(self, method: str, path: str, *, ok_statuses: set[int], **kwargs: Any):
         body = kwargs.get("json")
