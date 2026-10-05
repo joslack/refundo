@@ -9,7 +9,7 @@ A refund agent for Quillstack, a fictional subscription software company, and th
 | `world/` | The test world: record schema, scenario builders, 80 scenarios, the oracle, the labeling UI and the hand labels |
 | `agents/` | The agent implementations, one graph each, listed in `agents/langgraph.json`. They import nothing from `world/`; `tests/test_boundaries.py` enforces that |
 | `mcp_server/` | The tools the agent uses to read records (not built yet) |
-| `evals/` | The Harbor dataset. `environment/` defines the one environment every task runs in: the MCP server, the verifier and the reference solution. `build.py` writes a small task folder per scenario, `run.py` runs them, and `langsmith_plugin.py` records each run in LangSmith with the scenario's tier, area and reference answer |
+| `evals/` | The Harbor dataset. `environment/` defines the one environment every task runs in: the MCP server, the verifier and the reference solution. `build.py` writes a small task folder per scenario, `run.py` runs them, and `langsmith_plugin.py` records each run in LangSmith with the scenario's tier, area and reference answer. `pareto.py` and `latency.py` turn a sweep's job folders into the tables and charts in `results/<commit>/` |
 | `docs/` | The refund policy and the scenario catalog |
 | `deck/` | The presentation, as Markdown slides |
 | `process/` | How the work was done: edited transcripts of the working sessions with Claude, and the labeling session transcripts |
@@ -25,6 +25,8 @@ uv run python evals/build.py               # build the shared images and the Har
 uv run python evals/run.py oracle          # the reference solution on every task; it should score 1.0 everywhere
 uv run python evals/run.py sql             # the agent graph `sql` on the default model, recorded in LangSmith as an experiment
 uv run python evals/run.py sql -m all --efforts all   # every model in run.py at each reasoning effort it accepts
+uv run --with matplotlib python evals/pareto.py a3dd364   # that sweep's tables and charts, in evals/results/a3dd364/
+uv run --env-file .env python evals/latency.py a3dd364   # estimated seconds in model calls per case, from the LangSmith traces
 ```
 
 The dataset is all 80 scenarios. In LangSmith each one is marked hand-labeled or unlabeled, so results can be read for either group.
