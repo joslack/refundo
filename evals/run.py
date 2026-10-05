@@ -5,7 +5,7 @@
     uv run python evals/run.py sql -m mini,deepseek          chosen models, by short name below or full id
     uv run python evals/run.py sql -m all                    every model below
     uv run python evals/run.py sql -m all --efforts all      every model at each reasoning effort it accepts
-    uv run python evals/run.py sql -m luna --efforts low,high
+    uv run python evals/run.py sql -m luna --efforts default,low,high    "default" is the model with no effort set
     uv run python evals/run.py sql -i an-07 -n 2             anything else goes to `harbor run`
 
 Each model and reasoning effort is its own Harbor job, recorded in LangSmith as its own experiment on the
@@ -177,7 +177,8 @@ if __name__ == "__main__":
         plan = [(None, n) for n in names]
     else:
         wanted = EFFORT_ORDER if efforts == "all" else efforts.split(",")
-        plan = [(e, n) for e in wanted for n in names if n not in MODELS or e in MODELS[n][1]]
+        plan = [(None if e == "default" else e, n) for e in wanted for n in names
+                if e == "default" or n not in MODELS or e in MODELS[n][1]]
     commands = [(MODELS.get(n, (n,))[0], agent_command(graph, MODELS.get(n, (n,))[0], e, agents, commit, list(extra)))
                 for e, n in plan]
     print(f"{len(commands)} jobs, {JOBS_AT_ONCE} at a time; each job's output is in {JOBS.relative_to(ROOT)}/<job name>.log", flush=True)
