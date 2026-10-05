@@ -11,3 +11,14 @@ dist/
 wheels/
 *.egg-info/
 
+
+# Built slides
+deck/*.html
+
+# Local notes
+deck/prep-notes.md
+
+# Local inputs for the process transcripts
+process/*.local.*
+process/earlier-chat.txt
+process/convert_earlier_chat.py
