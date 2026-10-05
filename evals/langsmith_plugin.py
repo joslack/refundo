@@ -3,10 +3,11 @@
 evals/run.py loads this as `--plugin evals.langsmith_plugin:Annotated`. Harbor's plugin records each
 trial as a run in a LangSmith experiment, with the agent's own trace nested under it. This adds:
 
-- On each dataset example, before any trial runs: the oracle's outcome as the reference output, and the
-  scenario's tier, area and whether its answer was checked by hand. LangSmith copies an example's
-  metadata onto a run when the run is created, and Group by and the filters read that copy, so it has
-  to be on the example first. A run cannot be given it afterwards.
+- On each trial's run: the scenario's tier, area and whether its answer was checked by hand, with the
+  graph, model, reasoning effort and commit. These are what Group by and the filters in an experiment
+  read. Group by offers only the first ten metadata keys in alphabetical order, and Harbor's own keys
+  would fill them, so a run carries these ten and no others. A run cannot be given metadata afterwards.
+- On each dataset example: the oracle's outcome as the reference output, and the same labels.
 - On the experiment: the graph, model, reasoning effort, commit and tools.
 - On each trial's run: what the agent proposed and what it told the customer, at the top of the output.
 - On a missed case: a comment on the reward score saying what was expected.
@@ -102,6 +103,16 @@ class Annotated(LangSmithPlugin):
             "scenario": scenario.id, "difficulty": scenario.difficulty, "area": scenario.archetype,
             "answer_checked_by": checked, "summary": scenario.intent}
         body["split"] = ["base", scenario.difficulty, checked]
+
+    def _trial_metadata(self, event) -> dict[str, Any]:
+        internal = {k: v for k, v in super()._trial_metadata(event).items() if k.startswith("ls_")}
+        task = event.task_name.split("/")[-1]
+        scenario = SCENARIOS.get(task)
+        labels = {} if scenario is None else {
+            "answer_checked_by": "hand-labeled" if scenario.id in HAND_LABELED else "unlabeled",
+            "area": scenario.archetype, "difficulty": scenario.difficulty, "scenario": scenario.id}
+        about = {k: self._about[k] for k in ("commit", "graph", "model", "reasoning_effort")}
+        return internal | labels | about | {"task": task, "trial": event.config.trial_name}
 
     def _trial_outputs(self, result) -> dict[str, Any]:
         outputs = super()._trial_outputs(result)
