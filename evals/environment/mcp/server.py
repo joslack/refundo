@@ -1,7 +1,7 @@
-"""Spike MCP server: just enough tools for an agent to decide one refund request.
+"""MCP server over the scenario's database: the tools every agent design draws from.
 
-The database holds a single scenario, so nothing here scopes queries to a workspace. The real server
-has to.
+The database holds a single scenario, so nothing here scopes queries to a workspace. With more than one
+workspace in the database, it has to.
 """
 
 import json

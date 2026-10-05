@@ -1,0 +1,41 @@
+schema_version = "1.4"
+
+# After the agent has finished, Harbor copies its proposals out of the database for the verifier.
+artifacts = [{ source = "/tmp/proposals.json", service = "postgres" }]
+
+[task]
+name = "refundo/__NAME__"
+description = "One refund request, decided through an MCP server over a Postgres database."
+
+# For reading results by tier and area. The agent is never shown this file.
+[metadata]
+scenario = "__SCENARIO__"
+difficulty = "__DIFFICULTY__"
+archetype = "__ARCHETYPE__"
+
+[environment]
+docker_image = "refundo-main"
+
+[[environment.mcp_servers]]
+name = "quillstack"
+transport = "streamable-http"
+url = "http://mcp:8000/mcp"
+
+[agent]
+timeout_sec = 600.0
+
+[verifier]
+timeout_sec = 120.0
+
+[verifier.environment]
+docker_image = "refundo-verifier"
+
+[verifier.env]
+SCENARIO_ID = "__SCENARIO__"
+
+[[verifier.collect]]
+service = "postgres"
+command = "psql -U postgres -d quillstack -Atc \"select coalesce(json_agg(p order by p.id), '[]') from proposals p\" > /tmp/proposals.json"
+
+[solution.env]
+SCENARIO_ID = "__SCENARIO__"

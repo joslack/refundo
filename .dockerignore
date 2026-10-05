@@ -1,0 +1,6 @@
+# Only the verifier image is built from the repo root. It needs world/ and its own two files.
+*
+!world
+!evals/environment/verifier
+world/labels
+**/__pycache__

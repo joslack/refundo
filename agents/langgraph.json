@@ -1,5 +1,5 @@
 {
-  "dependencies": ["langchain>=1.4", "langchain-anthropic", "langchain-openai", "langchain-mcp-adapters"],
+  "dependencies": ["langchain>=1.4", "langchain-anthropic", "langchain-openai", "langchain-fireworks", "langchain-mcp-adapters"],
   "graphs": {
     "sql": "./sql_baseline.py:make_graph"
   }
