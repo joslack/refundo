@@ -128,7 +128,8 @@ def trials_of(job: Path, model: str) -> list[dict]:
             "amount": scores.get("amount") == 1.0, "sections": scores.get("sections") == 1.0,
             "proposal": submitted[-1] if submitted else None, "errored": bool(trial.get("exception_info")),
             "error": (trial.get("exception_info") or {}).get("exception_type", ""),
-            "model_calls": sum(m.get("type") == "ai" for m in messages),
+            # A model's message carries its token usage. A reply that a fixed graph wrote in code does not.
+            "model_calls": sum(m.get("type") == "ai" and bool(m.get("usage_metadata")) for m in messages),
             "tool_calls": sum(m.get("type") == "tool" for m in messages),
             "agent_seconds": round((datetime.fromisoformat(ran["finished_at"])
                                     - datetime.fromisoformat(ran["started_at"])).total_seconds(), 1) if timed else "",
