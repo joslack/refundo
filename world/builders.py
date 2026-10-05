@@ -34,7 +34,7 @@ from world.schema import (
 )
 
 # Placeholder price list, in cents per Seat. Annual is ten months' worth.
-MONTHLY_PRICE = {Tier.STARTER: 1000, Tier.TEAM: 2000, Tier.BUSINESS: 4000, Tier.PRO: 1500}
+MONTHLY_PRICE = {Tier.STARTER: 1000, Tier.TEAM: 2000, Tier.BUSINESS: 4000}
 ANNUAL_MONTHS = 10
 
 
@@ -108,10 +108,10 @@ class WorldBuilder:
         return user_id
 
     def plan_change(self, at: datetime, tier: Tier | None = None, interval: Interval | None = None,
-                    seats: int | None = None, migrated_from: Tier | None = None, actor: str | None = None) -> None:
+                    seats: int | None = None, actor: str | None = None) -> None:
         self.tier, self.interval, self.seats = tier or self.tier, interval or self.interval, seats or self.seats
         self.ws.plan_history.append(PlanPeriod(
-            tier=self.tier, interval=self.interval, seats=self.seats, effective_at=at, migrated_from=migrated_from,
+            tier=self.tier, interval=self.interval, seats=self.seats, effective_at=at,
         ))
         self.event("seats_changed" if tier is None and interval is None else "plan_changed", at, actor,
                    tier=self.tier.value, interval=self.interval.value, seats=self.seats)
@@ -175,11 +175,15 @@ class WorldBuilder:
         return next(i for i in self.world.invoices if i.id == invoice_id)
 
     def refund(self, invoice_id: str, at: datetime, amount: int | None = None, basis: str | None = None,
-               reason: str = "requested_by_customer") -> None:
+               reason: str = "requested_by_customer", ticket: str | None = None) -> None:
+        """Add a refund. `ticket` records that it was issued to honor a promise made in that ticket."""
         inv = self.invoice(invoice_id)
+        metadata = {"quillstack_basis": basis} if basis else {}
+        if ticket:
+            metadata["quillstack_ticket"] = ticket
         self.world.refunds.append(Refund(
             id=self._id("re"), charge_id=inv.charge_id, amount=amount or inv.amount_paid, created=at,
-            reason=reason, metadata={"quillstack_basis": basis} if basis else {},
+            reason=reason, metadata=metadata,
         ))
 
     def credit(self, at: datetime, amount: int, description: str) -> None:

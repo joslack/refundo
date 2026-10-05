@@ -75,9 +75,9 @@ The first thing I need is a world that's hard enough to be worth solving. My gue
 
 | | |
 |---|---|
-| **Policy** | 13 sections, grounded in published policies from Zoho, Atlassian, Slack and Microsoft, plus internal rules |
+| **Policy** | 10 sections, grounded in published policies from Zoho, Atlassian, Slack and Microsoft, plus internal rules |
 | **Records** | Members, invoices, refunds, disputes, sessions, app events, support tickets |
-| **Scenarios** | 79 cases covering the policy's rules and their boundaries |
+| **Scenarios** | 80 cases covering the policy's decision rules and their boundaries. The rules for how replies are written are not scored yet |
 | **Oracle** | Code that reads the records and computes the correct answer |
 
 Claude Code drafted the policy and wrote the scenarios and the oracle. I chose the problem, set the scoring and made the rulings. I have not read all of the world's code; I checked it by labeling cases by hand.
@@ -128,20 +128,21 @@ Where I disagree with it, either I made a mistake, there's a bug in the oracle, 
 
 | | |
 |---|---|
-| Cases labeled | 41 of 79: 32 blind, then 9 chosen so every kind of outcome was checked |
-| Agreed with the oracle on first pass | 24 of 41 |
-| My misses | 7 |
+| Cases labeled | 41 of 80: 32 blind, then 9 chosen so each kind of outcome was checked |
+| First pass, same action and amount as the answer key | 31 of 41 |
+| First pass, sections also complete | 24 of 41 |
+| My misses on the outcome | 7 |
 | Gaps in the policy's wording | 3 |
-| Oracle bugs | 2 |
-| Labeling tool conventions | 5 |
+| Incomplete citations, or the form's wording | 7 |
+| Oracle bugs found by labeling | 2 |
 | Median time per case | 2 minutes 45 seconds |
 
-After the rulings and fixes, all 41 agree.
+After the rulings and 17 corrected labels, all 41 agree. The first-pass rows are measured against the answer key as it is now.
 
 <!--
-I labeled 41 of the 79 cases. The first 32 were blind. The last nine I chose so that every kind of outcome the oracle can produce had been checked by a person. Four kinds were settled by a ruling instead of a label.
+I labeled 41 of the 80 cases. The first 32 were blind. The last nine I chose so that each kind of outcome the oracle can produce had been checked by a person. Of 31 kinds, 26 have a hand-labeled case. Four were settled by a ruling, and one case was written after I stopped labeling.
 
-On the first pass I agreed with the oracle on 24. The 17 disagreements are the finding. Seven were my own misses, all on hard cases. Three were places where the policy's wording was ambiguous or silent. Two were bugs in the oracle. Five were conventions in the labeling tool, like which section governs a denial.
+Measured against the answer key as it is now, 31 of my first-pass labels had the right action and amount, and 24 also named every section the outcome rests on. I corrected 17. Seven were my own misses on the outcome, all on hard cases. Three were places where the policy's wording was ambiguous or silent. Seven were citations: mostly a monthly denial where I named one of the two sections it rests on. Separately, labeling found two bugs in the oracle, where my label was right.
 
 All 41 agree now, but that is weaker evidence, because the labels and the oracle were adjusted to each other.
 
@@ -164,6 +165,34 @@ The time per case matters later: it's what a human reviewer costs, and that deci
 The first one is the reason I think this world is hard. I know the policy, I was being careful, and I counted rows without reading their status. I'd expect an agent to do the same.
 
 Two more misses worth mentioning if asked: a request that arrived 14 days and one hour after an annual renewal, and a dispute marked "lost", which in the payment processor's terms means the customer won.
+-->
+
+---
+
+<!-- _class: todo -->
+
+## What a second review found
+
+After labeling, I had the policy, the oracle and the labels reviewed again from the policy text alone.
+
+| | |
+|---|---|
+| Oracle bugs that 243 passing tests and 41 hand labels had not caught | 6 |
+| Policy sections the oracle did not implement | 3 |
+| Labels counted as agreeing without naming every section the outcome rests on | 7 |
+
+Each bug is now a test written from the policy text. The policy and the oracle cover the same rules. Section scoring is strict.
+
+<span class="small">TODO: say who or what did the review.</span>
+
+<!--
+The same-author problem came back. The tests compared the oracle with the scenarios, and both had one author, so they passed. My labels covered half the cases, and none of those cases contained these situations.
+
+The six bugs: an action before the login counted as usage; cancellation authority was read from a person's role today, not when they asked; a refund on a different charge counted as paying a written promise; a promise in a ticket hid a phone promise that should have escalated; the seat overcharge was wrong when a fixed credit was applied; and goodwill was granted after a switch to annual.
+
+Trials, seat changes and legacy plans were in the policy but not in the oracle. I cut them from the policy instead of building them. The world is already complicated enough, and the policy and the answer key now cover the same rules.
+
+What I take from it: agreement between things that share an author is weak evidence, and a second reader working from the policy text finds what the first one cannot.
 -->
 
 ---
@@ -260,7 +289,7 @@ Second metric: good faith. Did the agent cite the right section, and how often d
 
 ## The dataset
 
-- **79 scenarios**: 11 easy, 23 medium, 45 hard.
+- **80 scenarios**: 11 easy, 23 medium, 46 hard.
 - **Minimal pairs:** two cases identical except for one fact, with different answers. For example, a request one minute inside a deadline and one minute outside it.
 - **Claims with evidence:** each case lists the facts a correct decision depends on and the records that support them.
 
@@ -269,7 +298,7 @@ This lets me score an agent on its answer and on whether it looked at the right 
 <!--
 Give one pair out loud: a teammate who logged in and only viewed, versus one who exported once. Same world otherwise. One is a full refund, the other a denial.
 
-With 79 cases, one case is about 1.3 points. Differences of two or three cases are noise.
+With 80 cases, one case is 1.25 points. Differences of two or three cases are noise.
 -->
 
 ---

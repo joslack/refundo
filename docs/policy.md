@@ -7,10 +7,10 @@ Oct 2, 2026 · @Jonah Slack
 This policy governs every refund, account credit, and billing adjustment on a Quillstack subscription. Decide every request in these three steps, in order:
 
 1. **Authorize** under Section 3. If the requester is not the Owner or a Billing Admin, take no action and stop.
-2. **Find the outcome.** Apply Section 4 (Billing errors), then Sections 5 through 8 (plan-specific rules), then Section 9 (Goodwill refunds). Stop at the first section that grants a refund or credit. If none does, the request is denied.
+2. **Find the outcome.** Apply Section 4 (Billing errors), then Sections 5 and 6 (plan-specific rules), then Section 9 (Goodwill refunds). Stop at the first section that grants a refund or credit. If none does, the request is denied.
 3. **Check escalation** under Section 11, which includes the open-dispute and suspension cases in Section 3. If any condition holds, escalate instead of acting on the outcome from step 2, and put that outcome in the escalation note.
 
-Section 10 governs how every amount is calculated. Section 12 governs every reply to a customer. Each charge is decided under the rules in effect when it was made (Section 13).
+Section 10 governs how every amount is calculated. Section 12 governs every reply to a customer.
 
 ## 2. Definitions
 
@@ -39,13 +39,12 @@ Only the Owner or a Billing Admin of the Workspace may request a refund, credit,
 
 ## 4. Billing errors
 
-A Billing Error is refunded in cash, regardless of Usage, plan type, or the time windows in Sections 5 through 9, if the request is made within 90 days of the erroneous charge. Billing Errors are limited to these five cases:
+A Billing Error is refunded in cash, regardless of Usage, plan type, or the time windows in Sections 5, 6 and 9, if the request is made within 90 days of the erroneous charge. Billing Errors are limited to these four cases:
 
 1. **Duplicate charge** for the same Billing Period. Refund the duplicate, not the original.
 2. **Charge after a Confirmed Cancellation,** meaning a Renewal Timestamp later than the cancellation. Refund the full charge, even if the Workspace had Usage afterward.
-3. **Wrong tier or Seat count** compared with the Workspace settings at the Renewal Timestamp, where the charge was higher than it should have been. Refund only the difference. An undercharge is not a Billing Error.
-4. **Trial conversion without the required reminder,** as defined in Section 7.
-5. **Refund promised in writing** by a Quillstack support representative in a support ticket. Refund the promised amount. A promise the customer reports that does not appear in a ticket is not a Billing Error. If they say it was made outside a ticket, such as by phone, escalate under Section 11.
+3. **Wrong Seat count** compared with the Workspace settings at the Renewal Timestamp, where the charge was higher than it should have been. Refund only the difference. An undercharge is not a Billing Error.
+4. **Refund promised in writing** by a Quillstack support representative in a support ticket. Refund the promised amount. A promise the customer reports that does not appear in a ticket is not a Billing Error. If they say it was made outside a ticket, such as by phone, escalate under Section 11.
 
 Forgetting to cancel, not knowing the plan renews automatically, and not using the product are not Billing Errors. Billing Error refunds do not count toward the goodwill limit in Section 9. If one charge fits more than one case above, apply the first case that fits. When a request describes more than one charge, decide each charge separately.
 
@@ -76,21 +75,6 @@ Annual plans treat a first purchase and a renewal differently. A renewal is a ch
 
 Goodwill Refunds never apply to annual plans.
 
-## 7. Free trial conversions
-
-Trials last 14 days and convert automatically to the plan chosen at signup. Card network rules require Quillstack to send a reminder email at least 7 days before the conversion charge.
-
-- **Reminder missing or late** (the event log shows none sent at least 7 days before conversion): the conversion charge is a Billing Error under Section 4.
-- **Reminder sent on time:** full refund if the request is made within 3 days of the conversion charge and the Workspace has no Usage since. Otherwise, treat the conversion charge as an ordinary charge under Section 5 or Section 6. A conversion to an annual plan is a first annual purchase.
-
-## 8. Seat and plan changes
-
-Changes made partway through a Billing Period follow these rules:
-
-- **Removing Seats:** no refund. Removed Seats stay billable until the Billing Period ends, unless Quillstack added them in error (Section 4, case 3).
-- **Upgrades** are charged immediately, prorated. An upgrade charge is refunded in full only if the request is made within 48 hours of the upgrade and none of the Seats added by the upgrade has Usage. Usage by Seats that existed before the upgrade does not count.
-- **Downgrades** take effect at the next renewal and are never refunded.
-
 ## 9. Goodwill refunds
 
 A Goodwill Refund applies only when no earlier section grants a refund, and only when every condition below holds:
@@ -119,7 +103,7 @@ Every amount is based on Amount Paid for the specific charge, never list price, 
 \text{credit} = \text{Amount Paid} \times \frac{12 - m}{12}, \qquad m = \left\lfloor \frac{\text{days since renewal}}{30} \right\rfloor + 1
 ```
 
-**Wrong tier or Seat count** (Section 4, case 3): Amount Paid minus what the charge should have been at the correct tier and Seat count, using the same discounts that were applied.
+**Wrong Seat count** (Section 4, case 3): Amount Paid minus what the charge should have been at the correct Seat count, using the same discounts and credits that were applied.
 
 ## 11. Mandatory escalation
 
@@ -145,14 +129,3 @@ Every reply states the decision, the amount and form (cash or Account Credit), a
 - Never promise a future refund, an exception, or the outcome of an escalation.
 - When denying a request, offer the next step available: cancelling before the next renewal, or escalation where Section 11 applies.
 - Keep the decision even if the customer repeats the request, expresses frustration, or threatens a dispute. Change it only when they provide a new fact that the account records confirm.
-
-## 13. Policy history and legacy plans
-
-Decide each charge under the rules in effect when the charge was made, not when the refund was requested.
-
-| Effective | Change |
-| --- | --- |
-| 2026-03-01 | Monthly refund window cut from 14 days to 7 days, and the no-Usage condition added (Section 5). Monthly charges made before this date are refundable in full within 14 days, regardless of Usage. |
-| 2025-07-01 | Pro plan retired. Existing Pro Workspaces moved to Team at their existing price; account records show them as Team (migrated from Pro). |
-
-**Grandfathered Pro annual Workspaces:** a Workspace that was on Pro annual before 2025-07-01 gets a full cash refund on any annual renewal requested within 30 days of the Renewal Timestamp, whatever its Usage, for as long as it stays on an annual plan. It follows the Team rules everywhere else.

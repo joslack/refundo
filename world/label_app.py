@@ -15,47 +15,18 @@ from statistics import median
 
 import streamlit as st
 
+from world.labeling import (ACTIONS, LABELS, SECTIONS, SOURCES, agrees, load_labels, original, ui_action,
+                            uncovered)
 from world.oracle import label as oracle_label
-from world.scenario import Action
 from world.scenarios import ALL
 
-HERE = Path(__file__).resolve().parent
-LABELS = HERE / "labels"
-POLICY = HERE.parent / "docs" / "policy.md"
+POLICY = Path(__file__).resolve().parent.parent / "docs" / "policy.md"
 # The last round: one case for each kind of oracle outcome that no hand label had covered.
-FINAL_ROUND = ["GW-01", "GW-04a", "GW-06b", "GW-07", "AN-08", "AN-09b", "BE-10", "ESC-03a", "ESC-09a"]
-SECTIONS = ["2", "3", "4", "4.1", "4.2", "4.3", "4.4", "4.5", "5", "6", "7", "8", "9", "10", "11", "13"]
-ACTIONS = ["cash_refund", "account_credit", "deny", "escalate", "no_action"]
+# ESC-14 was written after that round, so it is queued here and has no label yet.
+FINAL_ROUND = ["GW-01", "GW-04a", "GW-06b", "GW-07", "AN-08", "AN-09b", "BE-10", "ESC-03a", "ESC-09a", "ESC-14"]
 ACTION_LABELS = {"cash_refund": "cash refund", "account_credit": "account credit", "deny": "deny",
                  "escalate": "escalate", "no_action": "no action (requester not authorized)"}
-# A cash refund is full or partial by its amount, so the two oracle actions are one choice here.
-TO_UI_ACTION = {"refund": "cash_refund", "partial_refund": "cash_refund", "credit": "account_credit"}
-
-
-def ui_action(action: str) -> str:
-    return TO_UI_ACTION.get(action, action)
-
-
-def sections_agree(picked: list[str], oracle, scenario) -> bool:
-    """A grant must name the governing section; any other outcome must name it or sections on its path.
-
-    Either way, nothing picked may be off the path. The path is what the oracle consulted, plus the
-    sections the scenario was written to exercise, the definitions in §2, and §10 when money is owed.
-    "4.5" counts as on the path when "4" is.
-    """
-    on_path = set(oracle.considered) | {oracle.section, "2"} | set(scenario.sections)
-    if oracle.amount_cents or (oracle.proposed and oracle.proposed.amount_cents):
-        on_path.add("10")
-    ok = all(p in on_path or p.split(".")[0] in on_path for p in picked)
-    grants = oracle.action in (Action.REFUND, Action.PARTIAL_REFUND, Action.CREDIT)
-    must = oracle.section if grants or oracle.action in (Action.ESCALATE, Action.NO_ACTION) else None
-    # "4" is accepted for "4.2": the general section stands for any of its cases.
-    return bool(picked) and ok and (must is None or must in picked or must.split(".")[0] in picked)
 SEED = 7  # fixes the case order, so a session can be resumed
-SOURCES = ["members", "workspace", "invoices", "refunds", "disputes", "subscription", "sessions", "app_events",
-           "tickets"]
-SOURCE_OF = {"usr": "members", "ws": "workspace", "in": "invoices", "re": "refunds", "cbtxn": "refunds",
-             "dp": "disputes", "sub": "subscription", "sess": "sessions", "ev": "app_events", "tkt": "tickets"}
 
 st.set_page_config(page_title="Refundo labeling", layout="wide")
 
@@ -80,13 +51,6 @@ def table(rows: list[dict]) -> None:
         st.caption("No records.")
 
 
-def load_labels(path: Path) -> dict[str, dict]:
-    if not path.exists():
-        return {}
-    rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    return {row["case_id"]: row for row in rows}  # a later label for the same case replaces the earlier one
-
-
 def record_options(s) -> dict[str, str]:
     """Every record in the case that a decision could cite: id -> label for the picker."""
     w = s.world
@@ -108,13 +72,6 @@ def record_options(s) -> dict[str, str]:
     return opts
 
 
-def is_covered(claim, records: list[str], sources: list[str]) -> bool:
-    """A claim is covered if the labeler cited its records, or checked the source it says is empty."""
-    checked = set(sources) | {SOURCE_OF[r.split("_")[0]] for r in records if r != "request"}
-    hits = [r[len("source:"):] in checked if r.startswith("source:") else r in records for r in claim.records]
-    return any(hits) if claim.need == "any" else all(hits)
-
-
 def show_records(s) -> None:
     w = s.world
     names = {m.id: m.name for m in w.members}
@@ -128,7 +85,7 @@ def show_records(s) -> None:
                  + f" · created {when(ws.created_at)} · Stripe customer `{ws.stripe_customer_id}`")
         st.caption("Plan history")
         table([{"effective": when(p.effective_at), "tier": p.tier.value, "interval": p.interval.value,
-                "seats": p.seats, "migrated from": p.migrated_from.value if p.migrated_from else ""}
+                "seats": p.seats}
                for p in ws.plan_history])
     with tabs[1]:
         table([{"id": m.id, "name": m.name, "email": m.email, "role": m.role.value, "joined": when(m.joined_at),
@@ -242,18 +199,18 @@ def review_page(order: list, labels: dict) -> None:
     for s in done:
         mine, oracle = labels[s.id], oracle_label(s.world, s.request)
         decisive = [e for e in oracle.evidence if e.kind == "decisive"]
-        missed = [e for e in decisive if not is_covered(e, mine["records"], mine.get("sources", []))]
+        missed = uncovered(mine, oracle)
         if missed:
             gaps.append((s, missed))
         oracle_amount = oracle.proposed.amount_cents if oracle.proposed else oracle.amount_cents
-        picked = mine.get("sections") or [mine["section"]]  # labels from before the multi-select hold one section
-        agree = ((ui_action(mine["action"]), mine["amount_cents"]) == (ui_action(oracle.action.value), oracle_amount)
-                 and sections_agree(picked, oracle, s))
+        picked = mine["sections"]
+        agree = agrees(mine, oracle)
         rows.append({"case": s.id, "tier": s.difficulty, "agree": "yes" if agree else "NO",
-                     "your action": ACTION_LABELS[ui_action(mine["action"])],
+                     "your action": ACTION_LABELS[mine["action"]],
                      "oracle action": ACTION_LABELS[ui_action(oracle.action.value)],
                      "your amount": money(mine["amount_cents"]), "oracle amount": money(oracle_amount),
-                     "your §": ", ".join(picked), "oracle §": f"{oracle.section} (path: {', '.join(oracle.considered)})",
+                     "your §": ", ".join(picked),
+                     "oracle §": f"{', '.join(oracle.must_cite)} (path: {', '.join(oracle.considered)})",
                      "decisive claims covered": f"{len(decisive) - len(missed)} of {len(decisive)}",
                      "corrected": "yes" if mine.get("corrected_from") else "",
                      "hard to call": "yes" if mine["hard_to_call"] else "", "seconds": mine["seconds"]})
@@ -269,9 +226,10 @@ def review_page(order: list, labels: dict) -> None:
     st.caption("Each one is a labeling slip, an oracle bug, or a gap in the policy.")
     for s, mine, oracle in disagreements:
         with st.expander(f"{s.id} · {s.intent}"):
-            st.markdown(esc(f"**You:** {mine['action']}, {money(mine['amount_cents'])}, §{', '.join(mine.get('sections') or [mine['section']])}. {mine['rationale']}"))
+            st.markdown(esc(f"**You:** {mine['action']}, {money(mine['amount_cents'])}, §{', '.join(mine['sections'])}. {mine['rationale']}"))
             st.markdown("**Oracle's claims:**\n" + esc("\n".join(f"- {e.claim} `{', '.join(e.records)}`" + ("" if e.kind == "decisive" else " (routine check)") for e in oracle.evidence)))
-            st.markdown(esc(f"**Oracle:** {oracle.action.value}, {money(oracle.amount_cents)}, §{oracle.section}. {oracle.rationale}"))
+            st.markdown(esc(f"**Oracle:** {oracle.action.value}, {money(oracle.amount_cents)}, "
+                            f"§{', '.join(oracle.must_cite)}. {oracle.rationale}"))
             if oracle.proposed:
                 st.markdown(esc(f"**Oracle would have proposed:** {oracle.proposed.action.value}, "
                                 f"{money(oracle.proposed.amount_cents)}, §{oracle.proposed.section}. {oracle.proposed.rationale}"))
@@ -281,11 +239,12 @@ def review_page(order: list, labels: dict) -> None:
         st.caption("None.")
     corrected = [(s, labels[s.id]) for s in done if labels[s.id].get("corrected_from")]
     st.subheader(f"Corrected labels ({len(corrected)})")
-    st.caption("Labels changed after a policy ruling, without relabeling. The original stays in the labels file.")
+    st.caption("Labels changed after a policy ruling or a scoring change, without relabeling. Each row keeps the "
+               "label as first recorded.")
     table([{"case": s.id,
-            "was": f"{ACTION_LABELS[ui_action(m['corrected_from']['action'])]}, "
-                   f"{money(m['corrected_from']['amount_cents'])}, §{m['corrected_from']['section']}",
-            "now": f"{ACTION_LABELS[ui_action(m['action'])]}, {money(m['amount_cents'])}, §{', '.join(m['sections'])}",
+            "was": f"{ACTION_LABELS[original(m)['action']]}, {money(original(m)['amount_cents'])}, "
+                   f"§{', '.join(original(m)['sections'])}",
+            "now": f"{ACTION_LABELS[m['action']]}, {money(m['amount_cents'])}, §{', '.join(m['sections'])}",
             "why": m["correction_reason"]} for s, m in corrected])
     st.subheader("Evidence gaps")
     st.caption("Decisive claims your evidence doesn't cover: facts that produce this outcome. Routine checks that "

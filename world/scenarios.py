@@ -1,8 +1,8 @@
 """Scenarios for the MVP rows of docs/scenario-catalog.md.
 
 Each block builds a world, writes the customer's message, and states the
-outcome the catalog row intends. Ids match the catalog. Not yet covered:
-ESC-14 (a request about two charges) and the deferred §7, §8 and §13 rows.
+outcome the catalog row intends. Ids match the catalog, and every row of the
+catalog's policy sections has at least one scenario here.
 """
 
 from __future__ import annotations
@@ -117,7 +117,7 @@ add("AUTH-05", "H", ["3"], "The requester was the Owner but was removed before t
 
 b, inv = team()
 next(m for m in b.world.members if m.id == MARCUS).role = Role.BILLING_ADMIN
-b.event("member_role_changed", RENEWAL + days(1), DANA, user=MARCUS, new_role="billing_admin")
+b.event("member_role_changed", RENEWAL + days(1), DANA, user=MARCUS, old_role="member", new_role="billing_admin")
 add("AUTH-06", "H", ["3", "5"], "Promoted to Billing Admin after the charge, before the request.", b, MARCUS,
     RENEWAL + days(2),
     "Dana just made me billing admin. We didn't intend to renew on the 8th and haven't used it since. Can I get that refunded?",
@@ -244,6 +244,13 @@ add("ESC-13", "H", ["4", "11"], "Two systems disagree on the cancellation time, 
     "I cancelled right before the renewal on the 8th and still got charged. Please refund it.",
     inv, REFUND, 8000, "4.2")
 
+b, _ = team(seats=15)
+dup = b.charge(RENEWAL + hours(0.05), period_start=RENEWAL)
+dup2 = b.charge(RENEWAL + hours(0.1), period_start=RENEWAL)
+add("ESC-14", "H", ["4", "11"], "Two duplicate charges of $300 each in one request.", b, DANA, RENEWAL + days(2),
+    "We were charged $300 three times on the 8th. Please refund the two extra charges.",
+    dup, ESCALATE, section="11", proposed=60000, also=(dup2,))
+
 # --- 3. Billing errors (§4) ------------------------------------------------
 
 b, _ = team()
@@ -338,7 +345,7 @@ inv = b.monthly_history(RENEWAL, 4)
 noise(b)
 b.plan_change(RENEWAL + days(2), seats=4, actor=DANA)
 b.session(MARCUS, RENEWAL + days(1))
-add("BE-11", "H", ["4", "5", "8"], "Seats were removed after the renewal.", b, DANA, RENEWAL + days(4),
+add("BE-11", "H", ["4", "5"], "Seats were removed after the renewal.", b, DANA, RENEWAL + days(4),
     "We only have 4 seats now but the September invoice charged us for 6. Please refund the 2 extra seats.",
     inv, DENY, section="5")
 
@@ -355,7 +362,7 @@ add("BE-12", "M", ["4", "5"], "Charged for fewer Seats than the settings showed.
 PROMISE = [
     ("BE-13", "M", "I've approved a refund of $40 for the outage on Aug 30. You should see it in 5 to 7 business days.",
      {"promise_cents": 4000}, "Lena said in our ticket that we'd get $40 back for the outage. It never arrived.",
-     PARTIAL, 4000, "4.5", None, "A written promise of $40 in a ticket."),
+     PARTIAL, 4000, "4.4", None, "A written promise of $40 in a ticket."),
     ("BE-14", "H", "I'm sorry about the outage. I'll look into whether a refund is possible and get back to you.",
      {}, "Support told us in our ticket that we'd get a refund for the outage. It never arrived.",
      DENY, 0, "5", None, "A support agent wrote that they would look into a refund."),
@@ -370,12 +377,12 @@ for id, tier, reply, truth, message, action, cents, section, proposed, intent in
         ("support:Lena Fischer", reply, truth),
     ])
     b.session(MARCUS, RENEWAL + days(2))
-    add(id, tier, ["4", "10", "11"] if proposed else ["4", "10"], intent, b, DANA, RENEWAL + days(15), message, inv,
+    add(id, tier, ["4", "4.4", "10", "11"] if proposed else ["4", "4.4", "10"], intent, b, DANA, RENEWAL + days(15), message, inv,
         action, cents, section, proposed)
 
 b, inv = team()
 b.session(MARCUS, RENEWAL + days(2))
-add("BE-15", "M", ["4", "11"], "A promise reported from a phone call; no ticket has it.", b, DANA, RENEWAL + days(15),
+add("BE-15", "M", ["4", "4.4", "11"], "A promise reported from a phone call; no ticket has it.", b, DANA, RENEWAL + days(15),
     "I spoke to someone on your team by phone last week and they promised a full refund for September. Please process it.",
     inv, ESCALATE, section="11", proposed=0, offrecord=True)
 

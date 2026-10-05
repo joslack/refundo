@@ -4,8 +4,8 @@ Two steps, kept apart on purpose:
     extract_facts(world, request) -> Facts     §2 definitions applied to raw records
     decide(facts) -> Outcome                   §1's three steps over those facts
 
-It covers the MVP sections (3, 4, 5, 6, 9, 10, 11). Trials (§7), seat and plan
-changes (§8) and legacy plans (§13) are not implemented yet.
+It implements every decision rule in docs/policy.md: §3, 4, 5, 6, 9, 10 and 11. §12 governs how
+replies are written, which is judged on the conversation and not here.
 """
 
 from __future__ import annotations
@@ -48,12 +48,14 @@ class Facts(BaseModel):
     cancel_requested_at: datetime | None = None  # earliest request by an Owner or Billing Admin, app or ticket
     cancel_completed_at: list[datetime] = []  # one per system that recorded a completed cancellation
     overcharge: int = 0
+    undercharged: bool = False  # billed for fewer Seats than the settings; not a Billing Error
     written_promise: int | None = None
     promise_paid: int = 0  # refunds issued since the promise was written
     # §9
     consecutive_paid_months: int = 0
     goodwill_in_last_365_days: bool = False
     is_most_recent_charge: bool = True
+    on_monthly_plan: bool = True  # the Workspace's plan at the Request Time
     support: dict[str, list[str]] = {}  # fact name -> ids of the records behind it
 
 
@@ -66,10 +68,17 @@ def extract_facts(world: World, request: Request) -> Facts:
     members = {m.id: m for m in world.members}
     requester = members.get(request.requester_user_id)
     billing_roles = {Role.OWNER, Role.BILLING_ADMIN}
-    authorized = bool(
-        requester and requester.role in billing_roles
-        and (requester.removed_at is None or requester.removed_at > now)
-    )
+
+    def role_at(user_id: str | None, at: datetime) -> Role | None:
+        """A person's role at a point in time: the current role, unwound through any later role changes."""
+        m = members.get(user_id)
+        if not m or at < m.joined_at or (m.removed_at is not None and at >= m.removed_at):
+            return None
+        later = sorted((e for e in world.app_events if e.type == "member_role_changed"
+                        and e.data.get("user") == user_id and e.at > at and "old_role" in e.data), key=lambda e: e.at)
+        return Role(later[0].data["old_role"]) if later else m.role
+
+    authorized = role_at(request.requester_user_id, now) in billing_roles
 
     inv = next(i for i in world.invoices if i.id == request.invoice_id)
     line = inv.lines[0]
@@ -96,13 +105,14 @@ def extract_facts(world: World, request: Request) -> Facts:
             support.setdefault("disputes", []).append(d.id)
             dispute = "open" if d.status in OPEN_DISPUTE else "customer_won" if d.status == "lost" else "quillstack_won"
 
-    # Usage: sessions with a login and at least one create, edit or export
+    # Usage: a login followed, in the same session, by at least one create, edit or export
     sessions: dict[str, list] = {}
     for e in world.session_events:
         sessions.setdefault(e.session_id, []).append(e)
+    logins = {sid: min((x.at for x in events if x.action == "login"), default=None) for sid, events in sessions.items()}
     active = [
-        (e.at, sid) for sid, events in sessions.items() if any(x.action == "login" for x in events)
-        for e in events if e.action in ACTIVE_ACTIONS
+        (e.at, sid) for sid, events in sessions.items() if logins[sid] is not None
+        for e in events if e.action in ACTIVE_ACTIONS and e.at >= logins[sid]
     ]
     active_times = [t for t, _ in active]
     support["usage_since"] = sorted({sid for t, sid in active if inv.created <= t <= now})
@@ -119,11 +129,10 @@ def extract_facts(world: World, request: Request) -> Facts:
     )
     support["duplicate"] = [duplicate_of] if duplicate_of else []
 
-    # Confirmed Cancellation (§2): a completed event, or a request by an Owner or Billing Admin
-    # before the Renewal Timestamp, in the app or a ticket, even if it failed.
-    def may_cancel(user_id: str | None) -> bool:
-        m = members.get(user_id)
-        return bool(m and m.role in billing_roles)
+    # Confirmed Cancellation (§2): a completed event, or a request by someone who was the Owner or a
+    # Billing Admin when they made it, before the Renewal Timestamp, in the app or a ticket, even if it failed.
+    def may_cancel(user_id: str | None, at: datetime) -> bool:
+        return role_at(user_id, at) in billing_roles
 
     # A cancellation belongs to the subscription it cancelled. One that came before the current
     # subscription's first charge (the customer signed up again) says nothing about this charge.
@@ -137,7 +146,7 @@ def extract_facts(world: World, request: Request) -> Facts:
     for e in world.app_events:
         if not current(e.at):
             continue
-        if e.type in {"cancellation_requested", "cancellation_failed"} and may_cancel(e.actor_user_id):
+        if e.type in {"cancellation_requested", "cancellation_failed"} and may_cancel(e.actor_user_id, e.at):
             requested.append(e.at)
             support.setdefault("cancel_request", []).append(e.id)
         elif e.type == "cancellation_completed":
@@ -145,7 +154,7 @@ def extract_facts(world: World, request: Request) -> Facts:
             support.setdefault("cancel_completed", []).append(e.id)
     for t in world.tickets:
         for m in t.messages:
-            if m.truth.get("cancellation_request") and may_cancel(m.author_id) and current(m.at):
+            if m.truth.get("cancellation_request") and may_cancel(m.author_id, m.at) and current(m.at):
                 requested.append(m.at)
                 support.setdefault("cancel_request", []).append(t.id)
     sub = next((s for s in world.subscriptions if s.customer == ws.stripe_customer_id), None)
@@ -153,22 +162,26 @@ def extract_facts(world: World, request: Request) -> Facts:
         completed.append(sub.canceled_at)
         support.setdefault("cancel_completed", []).append(sub.id)
 
-    # Wrong Seat count: invoiced Seats against the settings in effect at the charge
+    # Wrong Seat count: invoiced Seats against the settings in effect at the charge. The overcharge is
+    # the price of the extra Seats after the invoice's percentage discount; a fixed credit applied to
+    # the invoice would have been applied either way, so it does not change the difference (§10).
     settings = [p for p in ws.plan_history if p.effective_at <= inv.created][-1]
     overcharge = 0
-    if line.seats > settings.seats and line.tier == settings.tier:
-        overcharge = amount_paid * (line.seats - settings.seats) // line.seats
+    if line.seats > settings.seats:
+        extra = line.amount * (line.seats - settings.seats) // line.seats
+        overcharge = extra * (inv.subtotal - inv.discount) // inv.subtotal
 
-    # Written promise by a support representative, in a ticket
+    # Written promise by a support representative, in a ticket. Only a refund recorded against that
+    # ticket counts as paying it; a refund issued for some other reason does not.
     promise, promise_paid = None, 0
     for t in world.tickets:
         for m in t.messages:
             if m.author_type == "support_agent" and "promise_cents" in m.truth and m.at <= now:
                 promise = m.truth["promise_cents"]
                 support["promise"] = [t.id]
-                paid_since = [r for r in world.refunds if m.at <= r.created <= now]
-                promise_paid = sum(r.amount for r in paid_since)
-                support["promise_refunds"] = [r.id for r in paid_since]
+                paid = [r for r in world.refunds if r.metadata.get("quillstack_ticket") == t.id and r.created <= now]
+                promise_paid = sum(r.amount for r in paid)
+                support["promise_refunds"] = [r.id for r in paid]
 
     # Goodwill history. Months are counted as Billing Periods, so a duplicate invoice is not an extra
     # month, and the run stops at a period with no successful charge or at a gap between periods.
@@ -196,13 +209,16 @@ def extract_facts(world: World, request: Request) -> Facts:
         and i.billing_reason == "subscription_cycle" for i in world.invoices
     )
 
+    plan_now = [p for p in ws.plan_history if p.effective_at <= now][-1]
+
     return Facts(
-        now=now, authorized=authorized, invoice_id=inv.id, charged_at=inv.created, amount_paid=amount_paid,
+        now=now, authorized=authorized, on_monthly_plan=plan_now.interval is Interval.MONTH, invoice_id=inv.id, charged_at=inv.created, amount_paid=amount_paid,
         already_refunded=refunded, kind=kind, period_days=(inv.period_end - inv.period_start).days,
         dispute=dispute, tos_suspended=ws.status == "suspended" and ws.suspension_reason == "tos_violation",
         mentions_legal=request.mentions_legal, reports_offrecord_promise=request.reports_offrecord_promise, usage_since_charge=usage_since, usage_days_in_period=usage_days,
         duplicate_of=duplicate_of, cancel_requested_at=min(requested, default=None),
-        cancel_completed_at=completed, overcharge=overcharge, written_promise=promise, promise_paid=promise_paid,
+        cancel_completed_at=completed, overcharge=overcharge, undercharged=line.seats < settings.seats,
+        written_promise=promise, promise_paid=promise_paid,
         consecutive_paid_months=consecutive, goodwill_in_last_365_days=goodwill_recent,
         is_most_recent_charge=is_latest, support=support,
     )
@@ -277,14 +293,14 @@ def decide(f: Facts) -> Outcome:
     if f.mentions_legal:
         reasons.append("the customer mentions legal action or a regulator")
         c.add("The customer mentions legal action, a lawyer, or a regulator.", records=["request"])
-    if f.reports_offrecord_promise and proposal.section != "4.5":
+    if f.reports_offrecord_promise:
         reasons.append("the customer reports a promise made outside a ticket, which the records can't confirm or rule out")
         c.add("The customer reports a promise made outside a support ticket.", records=["request"])
     if proposal.section.startswith("4") and proposal.action is not Action.DENY and not _within(f, 90):
         reasons.append("a Billing Error was reported more than 90 days after the charge")
     if proposal.amount_cents > ESCALATION_CAP_CENTS:
         reasons.append("the amount is over $500")
-    if proposal.section == "4.5" and f.written_promise > f.amount_paid:
+    if proposal.section == "4.4" and f.written_promise > f.amount_paid:
         reasons.append("the refund promised in writing is larger than the Amount Paid for the charge")
     if conflict:
         reasons.append("the app event log and the billing system put the cancellation on opposite sides of the charge")
@@ -315,14 +331,22 @@ def _propose(f: Facts, cancelled_at: datetime | None, c: _Claims) -> Outcome:
         return _cash(c, owed, "4.2", "Charged after a Confirmed Cancellation.")
     c.add("No Confirmed Cancellation came before the charge.", records=cancel_records or ["source:app_events", "source:tickets"],
           rule_out=not cancel_records)
+    if cancel_records:
+        c.consider("4.2")
+    if f.undercharged:
+        c.consider("4.3")
+        c.add("The invoice bills fewer Seats than the Workspace settings; an undercharge is not a Billing Error.",
+              "workspace", rule_out=True)
     if f.overcharge:
         c.add("The invoice bills more Seats than the Workspace settings at the charge.", "workspace")
         return _cash(c, f.overcharge, "4.3", "Charged for more Seats than the Workspace settings at renewal.")
+    if f.written_promise is not None or f.reports_offrecord_promise:
+        c.consider("4.4")
     if f.written_promise is None:
         c.add("No ticket contains a written refund promise.", records=["source:tickets"], rule_out=True)
     elif f.written_promise > f.promise_paid and owed > 0:
         c.add(f"A support representative promised ${f.written_promise / 100:,.2f} in a ticket.", "promise")
-        return _cash(c, min(f.written_promise - f.promise_paid, owed), "4.5",
+        return _cash(c, min(f.written_promise - f.promise_paid, owed), "4.4",
                      "A support representative promised this refund in a ticket.")
     else:
         c.add("The refund promised in a ticket has already been paid.", "promise_refunds", ("refunds",))
@@ -368,7 +392,8 @@ def _goodwill(f: Facts, owed: int, c: _Claims) -> Outcome:
     c.consider("9")
     # When goodwill is denied, only the conditions that failed decide it; the ones that passed are rule-outs.
     months_ok, usage_ok = f.consecutive_paid_months >= 6, f.usage_days_in_period <= 10
-    denied = not (months_ok and usage_ok and not f.goodwill_in_last_365_days and _within(f, 30) and f.is_most_recent_charge)
+    denied = not (months_ok and usage_ok and not f.goodwill_in_last_365_days and _within(f, 30)
+                  and f.is_most_recent_charge and f.on_monthly_plan)
     c.add(f"The Workspace has {f.consecutive_paid_months} consecutive paid monthly charges.", records=["source:invoices"],
           rule_out=denied and months_ok)
     if f.goodwill_in_last_365_days:
@@ -380,13 +405,16 @@ def _goodwill(f: Facts, owed: int, c: _Claims) -> Outcome:
     failed = [name for name, ok in {
         "fewer than 6 consecutive paid months": f.consecutive_paid_months >= 6,
         "a goodwill refund in the last 365 days": not f.goodwill_in_last_365_days,
+        "the Workspace is no longer on a monthly plan": f.on_monthly_plan,
         "more than 30 days since the charge": _within(f, 30),
         "Usage on more than 10 days": f.usage_days_in_period <= 10,
         "not the most recent monthly charge": f.is_most_recent_charge,
     }.items() if not ok]
     if not failed:
         return _cash(c, owed, "9", "§5 grants nothing, and every goodwill condition holds.")
-    return _out(c, Action.DENY, 0, "5", "§5 grants nothing (window or Usage); goodwill fails: " + ", ".join(failed) + ".")
+    out = _out(c, Action.DENY, 0, "5", "§5 grants nothing (window or Usage); goodwill fails: " + ", ".join(failed) + ".")
+    out.must_cite = ["5", "9"]      # the denial rests on both sections granting nothing
+    return out
 
 
 def _within(f: Facts, n_days: int) -> bool:
@@ -407,7 +435,7 @@ def _flatten(c: _Claims) -> list[str]:
 
 def _out(c: _Claims, action: Action, amount: int, section: str, why: str) -> Outcome:
     c.consider(section)
-    return Outcome(action=action, amount_cents=amount, section=section, rationale=why,
+    return Outcome(action=action, amount_cents=amount, section=section, rationale=why, must_cite=[section],
                    records=_flatten(c), evidence=list(c.items), considered=list(c.sections))
 
 
@@ -424,6 +452,7 @@ def label(world: World, request: Request) -> Outcome:
     merged = primary.model_copy(deep=True)
     for o in outs[1:]:
         merged.considered += [s for s in o.considered if s not in merged.considered]
+        merged.must_cite += [s for s in o.must_cite if s not in merged.must_cite]
         merged.evidence += [e for e in o.evidence if e not in merged.evidence]
         merged.records = sorted(set(merged.records) | set(o.records))
     merged.rationale = " ".join(dict.fromkeys(o.rationale for o in outs))
@@ -433,6 +462,7 @@ def label(world: World, request: Request) -> Outcome:
         merged.considered += [s for s in ["11"] if s not in merged.considered]
         return merged.model_copy(update={
             "action": Action.ESCALATE, "amount_cents": 0, "form": None, "section": "11", "rationale": why,
+            "must_cite": ["11"],
             "proposed": Outcome(action=Action.REFUND if total else Action.DENY, amount_cents=total,
                                 section=primary.section, rationale="Total across the charges in the request."),
         })

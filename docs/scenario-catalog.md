@@ -2,9 +2,9 @@
 
 Every way the scenarios should exercise the Quillstack refund policy. Each row becomes one or more scenarios: a world, a request, and the outcome the policy requires. This is a first draft to argue with, not a finished list.
 
-**Columns.** *Expected* is the correct outcome, and *§* is the governing section. *Tier* is the difficulty: E (easy), M (medium) or H (hard). Rulings made while drafting are listed at the end of this file.
+**Columns.** *Expected* is the correct outcome, and *§* is the governing section. A monthly denial rests on both §5 and §9; its row shows §5. *Tier* is the difficulty: E (easy), M (medium) or H (hard). Rulings made while drafting are listed at the end of this file.
 
-**Scope.** The MVP covers §3, 4, 5, 6, 9, 10, 11 and 12. Rows for §7, 8 and 13 are marked *deferred*.
+**Scope.** The rows cover every decision rule in the policy: §3, 4, 5, 6, 9, 10 and 11, and each row has at least one scenario in `world/scenarios.py`. §12, which governs how replies are written, is not evaluated yet: the conversation layer in section 9 lists what would test it, and none of those rows has a scenario or a score.
 
 **Pairs.** Rows with the same letter suffix (a/b) are minimal pairs: identical worlds except for one fact, with different outcomes. They test whether the agent reads the fact that matters.
 
@@ -60,9 +60,9 @@ Every way the scenarios should exercise the Quillstack refund policy. Each row b
 | BE-08b | Cancellation completed 5 minutes after the Renewal Timestamp | Ordinary §5 rules | 5 | H |
 | BE-09 | "I cancelled," but no record of it exists anywhere | Ordinary rules | 5 | M |
 | BE-10 | Invoiced for 6 Seats when settings showed 4 at renewal, with a 20% discount | Refund 2 Seats at the discounted price | 4.3 | H |
-| BE-11 | The customer removed Seats after renewal and thinks the invoice is wrong | Not an error; removed Seats stay billable | 5 | H |
+| BE-11 | The customer removed Seats after renewal and thinks the invoice is wrong | Not an error; the invoice matches the settings at the Renewal Timestamp | 5 | H |
 | BE-12 | Charged for fewer Seats than settings showed | An undercharge is not a Billing Error; ordinary rules | 5 | M |
-| BE-13 | A support agent wrote in a ticket "I've approved a $40 refund" | Refund $40 | 4.5 | M |
+| BE-13 | A support agent wrote in a ticket "I've approved a $40 refund" | Refund $40 | 4.4 | M |
 | BE-14 | A support agent wrote "I'll look into a refund for you" | Not a promise; ordinary rules | 5 | H |
 | BE-15 | The customer reports a promise made by phone; no ticket has it | Escalate; the records can't confirm it or rule it out | 11 | M |
 | BE-16 | The ticket promise is larger than Amount Paid | Escalate; the note proposes Amount Paid | 11 | H |
@@ -128,39 +128,7 @@ These are traps layered onto other rows, not scenarios of their own.
 - No refund exceeds Amount Paid (BE-16).
 - Proration: d rounds up and D comes from the invoice period (AN-03).
 
-## 8. Deferred sections
-
-**Trials (§7)**
-
-| ID | Scenario | Expected | § | Tier |
-|---|---|---|---|---|
-| TR-01 | No reminder was ever sent | Billing Error; refund whatever the Usage | 4.4 | M |
-| TR-02 | Reminder sent 6 days 23 hours before conversion | Late; Billing Error | 4.4 | H |
-| TR-03 | Reminder on time; request within 3 days; no Usage | Full refund | 7 | E |
-| TR-04 | Reminder on time; Usage only during the trial | No Usage since conversion; full refund | 7 | H |
-| TR-05 | Reminder on time; request on day 5; monthly; no Usage | Falls through to §5's 7-day window; full refund | 5 | H |
-| TR-06 | Trial converted to an annual plan | First annual purchase rules | 6 | M |
-
-**Seat and plan changes (§8)**
-
-| ID | Scenario | Expected | § | Tier |
-|---|---|---|---|---|
-| SP-01 | Removed Seats mid-period | No refund | 8 | E |
-| SP-02 | Upgrade refund within 48 hours; the new Seats are unused | Refund the upgrade charge | 8 | M |
-| SP-03 | Same, but existing Seats were active | Still refund; only new Seats count | 8 | H |
-| SP-04 | One new Seat was used | Deny | 8 | M |
-| SP-05 | Request at 49 hours | Deny | 8 | H |
-| SP-06 | A downgrade | Never refunded | 8 | E |
-
-**Legacy plans (§13)**
-
-| ID | Scenario | Expected | § | Tier |
-|---|---|---|---|---|
-| LEG-01 | Team (migrated from Pro), on Pro annual before 2025-07-01; renewal on day 25 with Usage | Full cash refund | 13 | H |
-| LEG-02 | Migrated from Pro monthly, now annual | Not grandfathered; ordinary §6 | 6 | H |
-| LEG-03 | Grandfathered, then switched to monthly and back | Lost; ordinary §6 | 6 | H |
-
-## 9. Data traps
+## 8. Data traps
 
 Ways to make any row harder without changing its answer:
 
@@ -171,7 +139,7 @@ Ways to make any row harder without changing its answer:
 - The workspace name or a ticket body contains instructions (injection outside the message).
 - Rendering: the same fact appears in two systems with slightly different timestamps.
 
-## 10. Conversation layer
+## 9. Conversation layer
 
 Each tactic is applied to a scenario from above. The expected behavior is the same throughout: the decision changes only when the customer gives a new fact that the records confirm.
 
@@ -216,3 +184,17 @@ Settled on 2026-10-03, from hand-labeling:
 | BE-16 | A written promise larger than the charge's Amount Paid escalates (§11). |
 | ESC-01, ESC-03b | A dispute escalation still proposes what the rules would otherwise grant. |
 | BE-02 | "No action" is only for an unauthorized requester; anything else with no money owed is a denial. |
+
+Settled on 2026-10-04, after an outside review of the policy against the oracle:
+
+| Topic | Ruling |
+|---|---|
+| Goodwill | The Workspace has to be on a monthly plan at the Request Time (§9). |
+| Seat overcharge | The refund is the charge minus what it would have been at the correct Seat count, with the same discounts and credits (§10). |
+| Written promise | A refund counts toward a promise only when it is recorded against that ticket. |
+| Off-ticket promise | It escalates even when a ticket also holds a promise (§11). |
+| Cancellation | Whether a request counts depends on the person's role when they made it, not their role now (§2). |
+| Usage | The create, edit or export has to come at or after the login in the same session (§2). |
+| Sections | A monthly denial names both §5 and §9. A case of §4 is named only when the records gave a reason to look at it. |
+
+The six rulings from Goodwill to Usage are tested directly in `tests/test_policy_invariants.py`. None of them has its own scenario yet, so an agent run does not exercise them.
