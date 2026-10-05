@@ -6,6 +6,7 @@
     uv run python evals/run.py sql -m all                    every model below
     uv run python evals/run.py sql -m all --efforts all      every model at each reasoning effort it accepts
     uv run python evals/run.py sql -m luna --efforts default,low,high    "default" is the model with no effort set
+    uv run python evals/run.py sql,structured -m deepseek:medium,luna:high    two graphs, each model at one effort
     uv run python evals/run.py sql -m luna -k 5              each case five times, in the one experiment
     uv run python evals/run.py sql --dataset scratch         record in another LangSmith dataset, for a trial run
     uv run python evals/run.py sql -i an-07 -n 2             anything else goes to `harbor run`
@@ -234,10 +235,10 @@ def run_all(commands: list[tuple[str, list[str]]]) -> int:
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    graph, extra = sys.argv[1], sys.argv[2:]
+    graphs, extra = sys.argv[1].split(","), sys.argv[2:]
     JOBS.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%m%d-%H%M%S")
-    if graph == "oracle":
+    if graphs == ["oracle"]:
         cmd = oracle_command(extra, stamp)
         print(" ".join(cmd), flush=True)
         sys.exit(subprocess.run(cmd, cwd=ROOT).returncode)
@@ -251,14 +252,14 @@ if __name__ == "__main__":
     shutil.copytree(ROOT / "agents", agents, ignore=shutil.ignore_patterns("__pycache__"))
 
     plan: list[tuple[str | None, str]] = []  # (effort, model name), in the order to run
-    if efforts is None:
-        plan = [(None, n) for n in names]
+    if efforts is None:  # a model may name its own effort, as in luna:high
+        plan = [(effort or None, name) for name, _, effort in (n.partition(":") for n in names)]
     else:
         wanted = EFFORT_ORDER if efforts == "all" else efforts.split(",")
         plan = [(None if e == "default" else e, n) for e in wanted for n in names
                 if e == "default" or n not in MODELS or e in MODELS[n][1]]
     commands = [(MODELS.get(n, (n,))[0], agent_command(graph, MODELS.get(n, (n,))[0], e, agents, commit, list(extra), dataset))
-                for e, n in plan]
+                for graph in graphs for e, n in plan]
     keys = env_file()
     wrong = {model: problem for model in dict.fromkeys(c[0] for c in commands) if (problem := unsound(model, keys))}
     if wrong:
