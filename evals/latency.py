@@ -1,6 +1,8 @@
 """Estimate the seconds a case spent in model calls, for every finished experiment of one sweep.
 
-    uv run --env-file .env python evals/latency.py <commit>
+    uv run --env-file .env python evals/latency.py <commit> [dataset]
+
+The dataset is the LangSmith dataset the sweep was recorded in, where that is not the one evals/run.py names now.
 
 Wall time from a sweep cannot be compared across experiments: the machine's load changes, and for OpenAI models
 the agent waits before a call so that calls are at least `interval` seconds apart (60 / calls_per_minute, from
@@ -59,7 +61,7 @@ if __name__ == "__main__":
     rows = list(csv.DictReader(out.open())) if out.exists() else []
     have = {r["job"] for r in rows}
     client = Client()
-    dataset = client.read_dataset(dataset_name=DATASET)
+    dataset = client.read_dataset(dataset_name=sys.argv[2] if len(sys.argv) > 2 else DATASET)
     for experiment in sorted(client.list_projects(reference_dataset_id=dataset.id), key=lambda p: p.name):
         name = ((experiment.extra or {}).get("metadata") or {}).get("harbor_job_name", "")
         job = JOBS / name
