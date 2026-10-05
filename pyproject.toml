@@ -5,7 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "asyncpg>=0.31.0",
     "deepagents>=0.7.21",
+    "fastmcp>=4.0.11",
     "langsmith>=0.14.4",
     "streamlit>=1.65.0",
 ]
