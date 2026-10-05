@@ -1,18 +1,26 @@
-"""Cost against reward for every experiment of one sweep, as tables and two charts.
+"""Cost against reward for every experiment of one sweep, as tables and charts.
 
     uv run --with matplotlib python evals/pareto.py <commit>
 
 Reads the Harbor job folders in evals/jobs/ whose names carry the given commit (the one evals/run.py put in
 each job's name) and writes, to evals/results/<commit>/:
-    results.csv      one row per experiment: scores, calls, tokens, cost per case
-    cases.csv        one row per experiment and case: what was proposed, how it scored, calls, tokens, cost
-    pareto.png       reward against cost per case, one line per model across its reasoning efforts
+    results.csv      one row per experiment: scores, calls, seconds, tokens, cost per case
+    cases.csv        one row per trial: what was proposed, how it scored, calls, seconds, tokens, cost
+    misses.csv       one row per case and experiment with a wrong trial: what was expected and what was given
+    pareto.png       reward against cost per case, one line per agent and model across its reasoning efforts
     pareto-top.png   the same, zoomed on the experiments that are cheap and at least 80% right
     index.png        reward against the Artificial Analysis Intelligence Index for the same model and effort
 
-Reward is the share of the 80 cases where the action and the amount were both right. Cost per case is the
-experiment's tokens at the provider's list price, divided by the number of cases. The charts show experiments
-that have a result for all 80 cases. If evals/latency.py has written latency.csv beside them, its estimate of the
+An experiment is one agent graph, model and reasoning effort. Reward is the share of its trials where the action
+and the amount were both right. Where each case was run more than once (`run.py -k`), the reward is over all the
+trials, and results.csv also says how far a single run's score would stray from it (reward_sd) and how many cases
+were right every time, some of the time, and never. Cost per case is the experiment's tokens at the provider's
+list price, divided by the number of trials. The charts show experiments that have every case, the same number of
+times.
+
+Seconds per case is the median time the agent took, from its first model call to its reply, as Harbor timed it.
+It compares experiments that ran under the same load, and is left blank for a job whose model calls were paced,
+because the waits are in it. If evals/latency.py has written latency.csv beside the tables, its estimate of the
 seconds a case spent in model calls is added to results.csv.
 """
 
@@ -20,6 +28,8 @@ import csv
 import json
 import re
 import sys
+from collections import Counter
+from datetime import datetime
 from pathlib import Path
 from statistics import median
 
@@ -33,7 +43,9 @@ from matplotlib.transforms import Bbox  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from world.labeling import LABELS, load_labels  # noqa: E402
+from world.labeling import LABELS, load_labels, ui_action  # noqa: E402
+from world.oracle import label  # noqa: E402
+from world.scenarios import ALL  # noqa: E402
 
 JOBS = ROOT / "evals/jobs"
 OUT = ROOT / "evals/results"
@@ -92,10 +104,10 @@ def read_json(path: Path, default=None):
 NOT_A_RESULT = {"ApiUsageLimitError", "VerifierTimeoutError", "CancelledError"}
 
 
-def cases(job: Path, model: str) -> list[dict]:
-    """One row per case in a job folder. A case that was retried keeps its last trial."""
+def trials_of(job: Path, model: str) -> list[dict]:
+    """One row per trial in a job folder that produced a result."""
     price_in, price_read, price_write, price_out = PRICES[model]
-    rows: dict[str, dict] = {}
+    rows = []
     for path in sorted(job.glob("*/result.json")):
         trial = read_json(path)
         if not trial or (trial.get("exception_info") or {}).get("exception_type") in NOT_A_RESULT:
@@ -108,42 +120,62 @@ def cases(job: Path, model: str) -> list[dict]:
         write = sum(((m.get("usage_metadata") or {}).get("input_token_details") or {}).get("cache_creation") or 0
                     for m in messages if m.get("type") == "ai")
         submitted = read_json(path.parent / "artifacts/tmp/proposals.json") or []
-        case = trial["task_name"].split("/")[-1]
-        rows[case] = {
-            "case": case, "right": scores.get("reward") == 1.0, "action": scores.get("action") == 1.0,
+        ran = trial.get("agent_execution") or {}
+        timed = ran.get("started_at") and ran.get("finished_at")
+        rows.append({
+            "case": trial["task_name"].split("/")[-1], "trial": trial["trial_name"],
+            "right": scores.get("reward") == 1.0, "action": scores.get("action") == 1.0,
             "amount": scores.get("amount") == 1.0, "sections": scores.get("sections") == 1.0,
             "proposal": submitted[-1] if submitted else None, "errored": bool(trial.get("exception_info")),
             "error": (trial.get("exception_info") or {}).get("exception_type", ""),
             "model_calls": sum(m.get("type") == "ai" for m in messages),
             "tool_calls": sum(m.get("type") == "tool" for m in messages),
+            "agent_seconds": round((datetime.fromisoformat(ran["finished_at"])
+                                    - datetime.fromisoformat(ran["started_at"])).total_seconds(), 1) if timed else "",
             "input_tokens": tokens_in, "cached_tokens": read, "cache_write_tokens": write, "output_tokens": out,
             "cost_usd": ((tokens_in - read - write) * price_in + read * price_read + write * price_write
                          + out * price_out) / 1e6,
-        }
-    return list(rows.values())
+        })
+    return rows
 
 
 def experiments(commit: str) -> list[dict]:
-    """One row per model and effort for this commit. Each row's "cases" holds its per-case rows."""
+    """One row per agent graph, model and effort for this commit. Each row's "cases" holds its trials."""
     name = re.compile(rf"^(?P<graph>[a-z_]+)-(?P<model>.+)-(?P<effort>default|{'|'.join(EFFORTS)})-{re.escape(commit)}-\d{{4}}-\d{{6}}$")
-    best: dict[tuple[str, str], dict] = {}
+    best: dict[tuple[str, str, str], dict] = {}
     for job in sorted(p for p in JOBS.iterdir() if p.is_dir()):
         named = name.match(job.name)
         if not named or named["model"] not in PRICES:
             continue
-        model, effort = named["model"], named["effort"]
-        trials = cases(job, model)
+        graph, model, effort = named["graph"], named["model"], named["effort"]
+        trials = trials_of(job, model)
         if not trials:
             continue
 
         def share(flags: list[bool]) -> float | None:
             return round(100 * sum(flags) / len(flags), 1) if flags else None
 
+        # How often each case was right, over the times it was run.
+        by_case: dict[str, list[bool]] = {}
+        for t in trials:
+            by_case.setdefault(t["case"], []).append(t["right"])
+        times = {len(v) for v in by_case.values()}
+        rates = [sum(v) / len(v) for v in by_case.values()]
+        repeated = times != {1}
+        settings = ((read_json(job / "config.json") or {}).get("agents") or [{}])[0].get("kwargs") or {}
+        paced = bool((settings.get("configurable") or {}).get("calls_per_minute"))
+        seconds = [t["agent_seconds"] for t in trials if t["agent_seconds"] != ""]
         row = {
-            "graph": named["graph"], "model": model, "effort": effort,
+            "graph": graph, "model": model, "effort": effort,
             "effective_effort": DEFAULT_EFFORT.get(model, "default") if effort == "default" else effort,
-            "trials": len(trials), "complete": len(trials) == CASES, "reliable": model not in UNRELIABLE,
+            "trials": len(trials), "repeats": min(times), "complete": len(by_case) == CASES and len(times) == 1,
+            "reliable": model not in UNRELIABLE,
             "reward": share([t["right"] for t in trials]),
+            # One run of the 80 cases would land this many points from the reward, give or take, by chance alone.
+            "reward_sd": round(100 * sum(p * (1 - p) for p in rates) ** 0.5 / len(rates), 1) if repeated else "",
+            "cases_always_right": sum(p == 1 for p in rates) if repeated else "",
+            "cases_sometimes_right": sum(0 < p < 1 for p in rates) if repeated else "",
+            "cases_never_right": sum(p == 0 for p in rates) if repeated else "",
             "reward_hand_labeled": share([t["right"] for t in trials if t["case"] in HAND_LABELED]),
             "reward_unlabeled": share([t["right"] for t in trials if t["case"] not in HAND_LABELED]),
             "action": share([t["action"] for t in trials]), "amount": share([t["amount"] for t in trials]),
@@ -151,14 +183,15 @@ def experiments(commit: str) -> list[dict]:
             "no_proposal": sum(t["proposal"] is None for t in trials), "errored": sum(t["errored"] for t in trials),
             "model_calls_per_case": round(sum(t["model_calls"] for t in trials) / len(trials), 1),
             "tool_calls_per_case": round(sum(t["tool_calls"] for t in trials) / len(trials), 1),
+            "agent_seconds_per_case": round(median(seconds), 1) if seconds and not paced else "",
             "input_tokens": sum(t["input_tokens"] for t in trials), "cached_tokens": sum(t["cached_tokens"] for t in trials),
             "cache_write_tokens": sum(t["cache_write_tokens"] for t in trials),
             "output_tokens": sum(t["output_tokens"] for t in trials),
             "cost_per_case_usd": round(sum(t["cost_usd"] for t in trials) / len(trials), 6),
             "job": job.name, "cases": trials,
         }
-        # A model and effort run more than once (a restarted or test job) counts once: the job with the most cases.
-        key = (model, effort)
+        # A graph, model and effort run more than once (a restarted or test job) counts once: the job with the most trials.
+        key = (graph, model, effort)
         if key not in best or row["trials"] > best[key]["trials"]:
             best[key] = row
     return list(best.values())
@@ -226,41 +259,51 @@ def pareto_chart(rows: list[dict], path: Path, top: bool = False) -> None:
     middle_cost, middle_reward = median(costs), median(rewards)
     if top:
         right, floor = middle_cost * 2.2, 78
+    graphs = list(dict.fromkeys(r["graph"] for r in in_order(rows)))
+    mark = dict(zip(graphs, "osD^v"))  # one marker shape per agent graph
+    repeats = {r["repeats"] for r in rows}
     fig, ax = plt.subplots(figsize=(12, 6.8), dpi=160)
     style(ax, "Reward against cost per case" + (": the cheap, accurate corner" if top else ", by model and reasoning effort"),
-          f"Refund agent with a SQL tool, {CASES} cases. Each point is one experiment; a line joins one model's "
-          "reasoning efforts. Hollow point: no effort set.")
+          (f"Agent graph `{graphs[0]}`, " if len(graphs) == 1 else "") + f"{CASES} cases"
+          + (f", each run {min(repeats)} times; bars show how far a single run would stray" if repeats != {1} else "")
+          + ". Each point is one experiment; a line joins one model's reasoning efforts. Hollow point: no effort set.")
     ax.fill_between([left, middle_cost], middle_reward, 100, color="#dff5df", zorder=0,
                     label="Cheaper and better than the median experiment")
     anchors, points, labels = {}, [], []
     for model in PRICES:
-        mine = [r for r in rows if r["model"] == model]
-        if not mine:
-            continue
-        # The line runs through the model's efforts in order. Where the provider says which effort is the default,
-        # the run with no effort set stands in for that effort.
-        swept = sorted((r for r in mine if r["effective_effort"] in EFFORTS),
-                       key=lambda r: (EFFORTS.index(r["effective_effort"]), r["effort"] == "default"))
-        swept = [r for i, r in enumerate(swept) if i == 0 or r["effective_effort"] != swept[i - 1]["effective_effort"]]
-        ax.plot([r["cost_per_case_usd"] for r in swept], [r["reward"] for r in swept], "-", color=COLORS[model],
-                linewidth=1.6, zorder=3, alpha=0.4 if model in UNRELIABLE else 1.0)
-        shown = [r for r in mine if left <= r["cost_per_case_usd"] <= right and r["reward"] >= floor]
         faded = 0.4 if model in UNRELIABLE else 1.0
-        if shown:
-            ax.plot([], [], "-o", color=COLORS[model], linewidth=1.6, markersize=5.5, alpha=faded,
+        seen = []
+        for graph in graphs:
+            mine = [r for r in rows if r["model"] == model and r["graph"] == graph]
+            # The line runs through the model's efforts in order. Where the provider says which effort is the
+            # default, the run with no effort set stands in for that effort.
+            swept = sorted((r for r in mine if r["effective_effort"] in EFFORTS),
+                           key=lambda r: (EFFORTS.index(r["effective_effort"]), r["effort"] == "default"))
+            swept = [r for i, r in enumerate(swept) if i == 0 or r["effective_effort"] != swept[i - 1]["effective_effort"]]
+            ax.plot([r["cost_per_case_usd"] for r in swept], [r["reward"] for r in swept], "-", color=COLORS[model],
+                    linewidth=1.6, zorder=3, alpha=faded)
+            shown = [r for r in mine if left <= r["cost_per_case_usd"] <= right and r["reward"] >= floor]
+            for r in shown:
+                unset = r["effort"] == "default"
+                if r["reward_sd"] != "":
+                    ax.errorbar(r["cost_per_case_usd"], r["reward"], yerr=r["reward_sd"], color=COLORS[model], linewidth=1,
+                                capsize=2.5, zorder=3, alpha=faded)
+                ax.plot(r["cost_per_case_usd"], r["reward"], mark[graph], markersize=8 if unset else 5.5, color=COLORS[model],
+                        markerfacecolor="white" if unset else COLORS[model], markeredgewidth=1.6, zorder=4, alpha=faded)
+                points.append((r["cost_per_case_usd"], r["reward"]))
+                labels.append(ax.annotate(
+                    f"default ({r['effective_effort']})" if unset and r["effective_effort"] in EFFORTS else r["effort"],
+                    (r["cost_per_case_usd"], r["reward"]), textcoords="offset points", xytext=(5, 5),
+                    fontsize=7.5 if top else 6.5, color=COLORS[model], zorder=5, path_effects=HALO))
+            seen += shown
+        if seen:
+            ax.plot([], [], "-", color=COLORS[model], linewidth=1.6, alpha=faded,
                     label=NAMES[model] + (" (provider unstable, understated)" if model in UNRELIABLE else ""))
-        for r in shown:
-            unset = r["effort"] == "default"
-            ax.plot(r["cost_per_case_usd"], r["reward"], "o", markersize=8 if unset else 5.5, color=COLORS[model],
-                    markerfacecolor="white" if unset else COLORS[model], markeredgewidth=1.6, zorder=4, alpha=faded)
-            points.append((r["cost_per_case_usd"], r["reward"]))
-            labels.append(ax.annotate(
-                f"default ({r['effective_effort']})" if unset and r["effective_effort"] in EFFORTS else r["effort"],
-                (r["cost_per_case_usd"], r["reward"]), textcoords="offset points", xytext=(5, 5), fontsize=7.5 if top else 6.5,
-                color=COLORS[model], zorder=5, path_effects=HALO))
-        if shown:
-            best = max(shown, key=lambda r: (r["reward"], -r["cost_per_case_usd"]))
+            best = max(seen, key=lambda r: (r["reward"], -r["cost_per_case_usd"]))
             anchors[model] = (best["cost_per_case_usd"], best["reward"])
+    if len(graphs) > 1:
+        for graph in graphs:
+            ax.plot([], [], mark[graph], color="#444444", markersize=5.5, linestyle="none", label=f"agent `{graph}`")
     ax.plot([c for c, _ in line], [r for _, r in line], ":", color="#111111", linewidth=1.4, label="Pareto line", zorder=2)
     ax.set_xscale("log")
     ax.xaxis.set_major_formatter(FuncFormatter(dollars))
@@ -303,9 +346,12 @@ def correlation(xs: list[float], ys: list[float]) -> float | None:
 
 
 def index_pairs(rows: list[dict]) -> list[dict]:
-    """Our experiments beside the index score Artificial Analysis gives the same model and effort."""
+    """Our experiments beside the index score Artificial Analysis gives the same model and effort. The comparison
+    is between models, so it takes one agent graph: the one with the most experiments."""
+    graphs = [r["graph"] for r in rows]
+    most = max(set(graphs), key=graphs.count)
     pairs = []
-    for r in rows:
+    for r in (r for r in rows if r["graph"] == most):
         if not r["complete"] or not r["reliable"]:
             continue
         index = AA_INDEX.get(r["model"], {}).get(r["effective_effort"])
@@ -349,12 +395,36 @@ def index_chart(rows: list[dict], path: Path) -> dict:
 
 
 def in_order(rows: list[dict]) -> list[dict]:
-    return sorted(rows, key=lambda r: (list(PRICES).index(r["model"]), r["effort"] != "default",
+    return sorted(rows, key=lambda r: (r["graph"], list(PRICES).index(r["model"]), r["effort"] != "default",
                                        EFFORTS.index(r["effective_effort"]) if r["effective_effort"] in EFFORTS else 0))
 
 
+def misses(rows: list[dict]) -> list[dict]:
+    """One row per case and experiment where a trial was wrong, with the oracle's answer and what was given."""
+    expected = {}
+    for scenario in ALL:
+        oracle = label(scenario.world, scenario.request)
+        owed = oracle.proposed.amount_cents if oracle.proposed else oracle.amount_cents
+        expected[scenario.id.lower()] = (ui_action(oracle.action.value), owed or 0)
+    out = []
+    for r in in_order(rows):
+        by_case: dict[str, list[dict]] = {}
+        for t in r["cases"]:
+            by_case.setdefault(t["case"], []).append(t)
+        for case, trials in sorted(by_case.items()):
+            wrong = [t["proposal"] for t in trials if not t["right"]]
+            if not wrong:
+                continue
+            given = Counter(f"{p['action']} {p['amount_cents'] or 0}" if p else "nothing" for p in wrong)
+            out.append({"case": case, "graph": r["graph"], "model": r["model"], "effort": r["effort"],
+                        "right": len(trials) - len(wrong), "trials": len(trials),
+                        "expected_action": expected[case][0], "expected_amount_cents": expected[case][1],
+                        "given": "; ".join(f"{answer} ({n})" for answer, n in given.most_common())})
+    return sorted(out, key=lambda m: m["case"])
+
+
 def write_csv(rows: list[dict], folder: Path) -> None:
-    """results.csv and cases.csv. latency.csv, where evals/latency.py has written it, adds a column."""
+    """results.csv, cases.csv and misses.csv. latency.csv, where evals/latency.py has written it, adds a column."""
     latency = {}
     if (folder / "latency.csv").exists():
         with (folder / "latency.csv").open() as f:
@@ -365,18 +435,25 @@ def write_csv(rows: list[dict], folder: Path) -> None:
         writer = csv.DictWriter(f, fieldnames=[k for k in rows[0] if k != "cases"], extrasaction="ignore")
         writer.writeheader()
         writer.writerows(in_order(rows))
-    columns = ["model", "effort", "case", "right", "action", "amount", "sections", "proposed_action", "proposed_amount_cents",
-               "error", "model_calls", "tool_calls", "input_tokens", "cached_tokens", "cache_write_tokens", "output_tokens",
-               "cost_usd"]
+    columns = ["graph", "model", "effort", "case", "trial", "right", "action", "amount", "sections", "proposed_action",
+               "proposed_amount_cents", "error", "model_calls", "tool_calls", "agent_seconds", "input_tokens", "cached_tokens",
+               "cache_write_tokens", "output_tokens", "cost_usd"]
     with (folder / "cases.csv").open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         for r in in_order(rows):
-            for t in sorted(r["cases"], key=lambda t: t["case"]):
+            for t in sorted(r["cases"], key=lambda t: (t["case"], t["trial"])):
                 proposed = t["proposal"] or {}
-                writer.writerow(t | {"model": r["model"], "effort": r["effort"], "cost_usd": round(t["cost_usd"], 6),
+                writer.writerow(t | {"graph": r["graph"], "model": r["model"], "effort": r["effort"],
+                                     "cost_usd": round(t["cost_usd"], 6),
                                      "proposed_action": proposed.get("action", ""),
                                      "proposed_amount_cents": proposed.get("amount_cents", "")})
+    missed = misses(rows)
+    with (folder / "misses.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["case", "graph", "model", "effort", "right", "trials", "expected_action",
+                                               "expected_amount_cents", "given"])
+        writer.writeheader()
+        writer.writerows(missed)
 
 
 if __name__ == "__main__":
@@ -384,11 +461,15 @@ if __name__ == "__main__":
     out = OUT / sys.argv[1]
     out.mkdir(parents=True, exist_ok=True)
     write_csv(rows, out)
-    pareto_chart(rows, out / "pareto.png")
-    pareto_chart(rows, out / "pareto-top.png", top=True)
-    found = index_chart(rows, out / "index.png")
+    found = "no experiment has every case yet, so no charts"
+    if any(r["complete"] for r in rows):
+        pareto_chart(rows, out / "pareto.png")
+        pareto_chart(rows, out / "pareto-top.png", top=True)
+        found = index_chart(rows, out / "index.png")
     for r in sorted(rows, key=lambda r: (-r["reward"], r["cost_per_case_usd"])):
-        print(f"{NAMES[r['model']]:24} {r['effort']:8} reward {r['reward']:5.1f}%  cost/case ${r['cost_per_case_usd']:.4f}  "
-              f"cases {r['trials']:3}{'' if r['complete'] else ' (in progress)'}  no proposal {r['no_proposal']:2}  "
-              f"errored {r['errored']:2}")
+        spread = "" if r["reward_sd"] == "" else f" (sd {r['reward_sd']})"
+        print(f"{r['graph']:11} {NAMES[r['model']]:24} {r['effort']:8} reward {r['reward']:5.1f}%{spread}"
+              f"  cost/case ${r['cost_per_case_usd']:.4f}  tool calls {r['tool_calls_per_case']:4}  seconds {r['agent_seconds_per_case']:>5}"
+              f"  trials {r['trials']:3}{'' if r['complete'] else ' (not every case)'}"
+              f"  no proposal {r['no_proposal']:2}  errored {r['errored']:2}")
     print(f"{len(rows)} experiments; rank correlation with the Artificial Analysis index: {found}")

@@ -1,6 +1,12 @@
 {
-  "dependencies": ["langchain>=1.4", "langchain-openai", "langchain-fireworks", "langchain-mcp-adapters"],
+  "dependencies": [
+    "langchain>=1.4",
+    "langchain-openai",
+    "langchain-fireworks",
+    "langchain-mcp-adapters"
+  ],
   "graphs": {
-    "sql": "./sql_baseline.py:make_graph"
+    "sql": "./sql_baseline.py:make_graph",
+    "structured": "./structured.py:make_graph"
   }
 }
