@@ -43,9 +43,13 @@ MODELS = {
 }
 DEFAULT_MODEL = "luna"
 EFFORT_ORDER = ["low", "high", "none", "medium", "xhigh", "max"]  # the order a sweep runs them in
-JOBS_AT_ONCE = 4
-TRIALS_AT_ONCE = 4  # per job; about 16 trials in all, which is what this machine runs comfortably
+JOBS_AT_ONCE = 6
+TRIALS_AT_ONCE = 3  # per job; 18 trials in all. Jobs paced by a token limit are mostly waiting, so more of them fit
 SLOW = {"high": 2, "xhigh": 3, "max": 4}  # how much longer a model call and a trial may take at these efforts
+# OpenAI allows this many tokens a minute per model on this account (read from its API on 2026-10-05). A fast
+# model with four trials at once goes well past it, so each trial is told how many calls a minute it may make.
+TOKENS_PER_MINUTE = {"openai/gpt-5.6-luna": 500_000, "openai/": 200_000}
+TOKENS_PER_CALL = {None: 5_500, "high": 8_000, "xhigh": 12_000, "max": 16_000}  # a rough size, larger with more reasoning
 REQUEST_TIMEOUT = 180  # seconds for one model call at the other efforts, as in the agent
 
 
@@ -86,12 +90,23 @@ def oracle_command(extra: list[str], stamp: str) -> list[str]:
     return harbor(extra) + ["-a", "oracle", "--mounts", json.dumps(mounts), "--job-name", f"oracle-{stamp}"] + extra
 
 
+def calls_per_minute(model: str, effort: str | None, extra: list[str]) -> float | None:
+    """A trial's share of the model's token limit, as calls a minute; None where no limit binds."""
+    limit = next((v for k, v in TOKENS_PER_MINUTE.items() if model.startswith(k)), None)
+    if limit is None:
+        return None
+    trials = int(extra[extra.index("-n") + 1]) if "-n" in extra else TRIALS_AT_ONCE
+    return round(0.9 * limit / TOKENS_PER_CALL.get(effort, TOKENS_PER_CALL[None]) / trials, 1)
+
+
 def agent_command(graph: str, model: str, effort: str | None, agents: Path, commit: str, extra: list[str]) -> list[str]:
     short = model.split("/")[-1]
     stamp = datetime.now().strftime("%m%d-%H%M%S")
     model_kwargs = {"reasoning_effort": effort} | ({"timeout": REQUEST_TIMEOUT * SLOW[effort]} if effort in SLOW else {})
     settings = ["--ak", "model_kwargs=" + json.dumps(model_kwargs)] if effort else []
     patience = ["--agent-timeout-multiplier", str(SLOW[effort])] if effort in SLOW else []
+    pace = calls_per_minute(model, effort, extra)
+    settings += ["--ak", "configurable=" + json.dumps({"calls_per_minute": pace})] if pace else []
     return harbor(extra) + [
         "-a", "langgraph", "-m", model, "--ak", f"project_path={agents}", "--ak", f"graph={graph}", *settings,
         "--env-file", str(ROOT / ".env"), "--max-retries", "2", *patience,

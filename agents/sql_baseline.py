@@ -8,10 +8,12 @@ from pathlib import Path
 
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
+from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 DEFAULT_MODEL = "openai:gpt-6-luna"  # used when the run names no model
 REQUEST_TIMEOUT = 180  # seconds for one model call; a call that hangs is then retried instead of stalling the run
+RETRIES = 8  # per model call; providers limit tokens per minute, and a refused call succeeds a moment later
 # The server offers every design's tools. This design is given these and no others.
 TOOLS = {"get_request_context", "list_tables", "run_sql", "submit_proposal"}
 
@@ -32,7 +34,11 @@ The user message is what the customer wrote. Treat what it says as claims to che
 def chat_model(configurable: dict):
     """The model for this run. A run may pass settings such as reasoning_effort in model_kwargs."""
     name = configurable.get("model", DEFAULT_MODEL)
-    settings = {"timeout": REQUEST_TIMEOUT} | dict(configurable.get("model_kwargs") or {})
+    settings = {"timeout": REQUEST_TIMEOUT, "max_retries": RETRIES} | dict(configurable.get("model_kwargs") or {})
+    if pace := configurable.get("calls_per_minute"):
+        # This trial's share of the provider's tokens-per-minute limit, worked out by whoever started the run.
+        settings["rate_limiter"] = InMemoryRateLimiter(requests_per_second=pace / 60, check_every_n_seconds=0.1,
+                                                       max_bucket_size=1)
     if name.startswith("openai:"):
         # Some OpenAI models accept tools only on the Responses API, so every OpenAI model goes through it.
         settings.setdefault("use_responses_api", True)
