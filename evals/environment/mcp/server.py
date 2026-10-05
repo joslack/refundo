@@ -1,8 +1,8 @@
 """MCP server over the scenario's database: the tools every agent design draws from.
 
-There are two sets for reading records. One is a schema listing and read-only SQL. The other is a tool per kind
-of record, each returning it with the policy's own terms worked out. Every agent finds out who is asking, and
-records its decision, through the same two tools. Each agent graph lists the tools it uses.
+There are three ways to read records. One is a schema listing and read-only SQL. One is a tool per kind of
+record, each returning it with the policy's own terms worked out. One is a single tool that returns all of those
+records at once. Every agent records its decision through the same tool. Each agent graph lists the tools it uses.
 
 The database holds a single scenario, so nothing here scopes queries to a workspace. With more than one
 workspace in the database, it has to.
@@ -10,7 +10,7 @@ workspace in the database, it has to.
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 import asyncpg
@@ -157,6 +157,21 @@ def usage_view(events: list[dict], since: str, until: str) -> dict:
             "days_with_usage": days, "sessions_without_usage": quiet}
 
 
+def charge_timing(charge: dict, events: list[dict], now: str) -> dict:
+    """What the policy's time and Usage tests ask about one charge, as of the request."""
+    elapsed = when(now) - when(charge["charged_at"])
+    since = usage_view(events, charge["charged_at"], now)["sessions_with_usage"]
+    in_period = usage_view(events, charge["billing_period_start"], min(charge["billing_period_end"], now, key=when))
+    return {
+        # Hours are rounded up, so a request a second past a limit never reads as inside it.
+        "time_from_charge_to_request": {"hours": -(-elapsed // timedelta(seconds=36)) / 100,
+                                        "whole_days_rounded_up": -(-elapsed // timedelta(days=1))},
+        "usage_since_charge": {"sessions_with_usage": len(since),
+                               "first_usage_at": since[0]["first_usage_at"] if since else None},
+        "days_with_usage_in_billing_period": len(in_period["days_with_usage"]),
+    }
+
+
 async def request_time() -> str:
     return (await rows("SELECT received_at FROM request_context"))[0]["received_at"]
 
@@ -249,6 +264,43 @@ async def list_account_credits() -> list[dict]:
     the customer."""
     return [{"credit_id": c["id"], "amount_cents": c["amount"], "at": c["created"], "description": c["description"],
              "details": parsed(c["metadata"])} for c in await rows("SELECT * FROM credits ORDER BY created")]
+
+
+# --- The whole account in one read ------------------------------------------
+
+
+@mcp.tool
+async def get_case_file() -> dict:
+    """Everything on record about the request and the account, as of the time of the request: who is asking and
+    the role they hold, the workspace and its plan over time, the app's log of cancellations, plan changes, seat
+    changes and suspensions, every charge with its refunds and disputes, every support ticket, and every change
+    to the account credit balance.
+
+    All amounts are in cents. amount_paid_cents is the policy's Amount Paid: what was charged after discounts and
+    applied account credit, before tax. charged_to_card_cents includes tax. A negative account credit amount is
+    credit given to the customer.
+
+    Each charge carries three facts as of the time of the request:
+      time_from_charge_to_request        hours from the charge to the request, and the same as whole days rounded up
+      usage_since_charge                 how many sessions had Usage since the charge, and when the first began
+      days_with_usage_in_billing_period  how many calendar days had Usage in the charge's billing period
+    Usage is as the policy defines it: a session with a login followed by at least one create, edit or export.
+    Views alone are not Usage.
+
+    A cancellation can be recorded in two places: the app's event log and the processor's `canceled_at`. Each
+    event that a person caused, and each ticket message from a customer, carries the role that person held at
+    that moment.
+    """
+    request = await get_request_context()
+    events = await rows("SELECT * FROM session_events")
+    return {
+        "request": request,
+        "requester": await get_requester(),
+        **await get_subscription(),
+        "charges": [charge | charge_timing(charge, events, request["received_at"]) for charge in await list_charges()],
+        "tickets": await list_tickets(),
+        "account_credits": await list_account_credits(),
+    }
 
 
 if __name__ == "__main__":
