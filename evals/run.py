@@ -6,11 +6,17 @@
     uv run python evals/run.py sql -m all                    every model below
     uv run python evals/run.py sql -m all --efforts all      every model at each reasoning effort it accepts
     uv run python evals/run.py sql -m luna --efforts default,low,high    "default" is the model with no effort set
+    uv run python evals/run.py sql -m luna -k 5              each case five times, in the one experiment
+    uv run python evals/run.py sql --dataset scratch         record in another LangSmith dataset, for a trial run
     uv run python evals/run.py sql -i an-07 -n 2             anything else goes to `harbor run`
 
 Each model and reasoning effort is its own Harbor job, recorded in LangSmith as its own experiment on the
 dataset below and named graph-model-effort-commit-time. Several jobs run at once, never two on the same
 model, because providers limit tokens per minute per model.
+
+Before any job starts, each model is asked one sum, so an account without credits or a broken endpoint stops
+the run and not the first experiment. While a job runs it is stopped if its last few cases all end without a
+proposal, which is what a provider refusing calls looks like from here; the model's other jobs are dropped.
 
 The agent code is copied when the command starts and every job uses that copy, so the repo can change
 while jobs run without changing what they test.
@@ -22,6 +28,8 @@ import shutil
 import subprocess
 import sys
 import threading
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -46,11 +54,17 @@ EFFORT_ORDER = ["low", "high", "none", "medium", "xhigh", "max"]  # the order a 
 JOBS_AT_ONCE = 6
 TRIALS_AT_ONCE = 3  # per job; 18 trials in all. Jobs paced by a token limit are mostly waiting, so more of them fit
 SLOW = {"high": 2, "xhigh": 3, "max": 4}  # how much longer a model call and a trial may take at these efforts
-# OpenAI allows this many tokens a minute per model on this account (read from its API on 2026-10-05). A fast
-# model with four trials at once goes well past it, so each trial is told how many calls a minute it may make.
-TOKENS_PER_MINUTE = {"openai/gpt-5.6-luna": 500_000, "openai/": 200_000}
+# OpenAI allows 200,000 tokens a minute per model on this account (read from its API on 2026-10-05). These two
+# models make 15 to 20 calls a case and go past it with three trials at once, so each of their trials is told how
+# many calls a minute it may make. A paced trial can wait before a call, and the wait counts as model time, so no
+# other model is paced and a paced experiment says so in its LangSmith metadata.
+TOKENS_PER_MINUTE = {"openai/gpt-5.4-mini": 200_000, "openai/gpt-5.4-nano": 200_000}
 TOKENS_PER_CALL = {None: 5_500, "high": 8_000, "xhigh": 12_000, "max": 16_000}  # a rough size, larger with more reasoning
 REQUEST_TIMEOUT = 180  # seconds for one model call at the other efforts, as in the agent
+# Where a provider's models answer a plain chat request, the key that pays for it, and the name of its token cap.
+PROVIDERS = {"openai/": ("https://api.openai.com/v1/chat/completions", "OPENAI_API_KEY", "max_completion_tokens"),
+             "fireworks/": ("https://api.fireworks.ai/inference/v1/chat/completions", "FIREWORKS_API_KEY", "max_tokens")}
+BROKEN_AFTER = 6  # a job whose last cases all ended without a proposal, this many in a row, is stopped
 
 
 def git(*args: str) -> str:
@@ -105,7 +119,8 @@ def plugin_settings(**settings) -> list[str]:
     return [arg for key, value in settings.items() for arg in ("--pk", f"{key}={json.dumps(value)}")]
 
 
-def agent_command(graph: str, model: str, effort: str | None, agents: Path, commit: str, extra: list[str]) -> list[str]:
+def agent_command(graph: str, model: str, effort: str | None, agents: Path, commit: str, extra: list[str],
+                  dataset: str = DATASET) -> list[str]:
     short = model.split("/")[-1]
     stamp = datetime.now().strftime("%m%d-%H%M%S")
     model_kwargs = {"reasoning_effort": effort} | ({"timeout": REQUEST_TIMEOUT * SLOW[effort]} if effort in SLOW else {})
@@ -117,9 +132,52 @@ def agent_command(graph: str, model: str, effort: str | None, agents: Path, comm
         "-a", "langgraph", "-m", model, "--ak", f"project_path={agents}", "--ak", f"graph={graph}", *settings,
         "--env-file", str(ROOT / ".env"), "--max-retries", "2", *patience,
         "--plugin", "evals.langsmith_plugin:Annotated", *plugin_settings(
-            dataset_name=DATASET, graph=graph, model=short, reasoning_effort=effort or "default", commit=commit,
-            tools=tools_of(graph, agents)),
+            dataset_name=dataset, graph=graph, model=short, reasoning_effort=effort or "default", commit=commit,
+            tools=tools_of(graph, agents), paced=bool(pace)),
         "--job-name", f"{graph}-{short}-{effort or 'default'}-{commit}-{stamp}"] + extra
+
+
+def env_file() -> dict[str, str]:
+    """The keys in .env, the file Harbor is also given."""
+    pairs = (line.split("=", 1) for line in (ROOT / ".env").read_text().splitlines() if "=" in line and not line.startswith("#"))
+    return {key.strip(): value.strip().strip('"\'') for key, value in pairs}
+
+
+def unsound(model: str, keys: dict[str, str]) -> str | None:
+    """Ask the model one sum. Returns what is wrong, or None: it answered, and the answer holds the number."""
+    known = next((v for k, v in PROVIDERS.items() if model.startswith(k)), None)
+    if known is None:
+        return None  # a provider this does not know how to ask
+    url, key, cap = known
+    body = {"model": model.split("/", 1)[1], cap: 3000,
+            "messages": [{"role": "user", "content": "What is 17 times 3? Reply with the number only."}]}
+    request = urllib.request.Request(url, data=json.dumps(body).encode(), headers={
+        "Authorization": f"Bearer {keys.get(key, '')}", "Content-Type": "application/json"})
+    try:
+        answer = json.load(urllib.request.urlopen(request, timeout=120))["choices"][0]["message"].get("content") or ""
+    except urllib.error.HTTPError as e:
+        return f"HTTP {e.code}: {e.read().decode(errors='replace')[:300]}"
+    except (OSError, ValueError, KeyError, IndexError) as e:
+        return f"{type(e).__name__}: {e}"
+    return None if "51" in answer and len(answer) < 200 else f"answered {answer[:80]!r} to 17 times 3"
+
+
+def without_proposal(job: Path) -> int:
+    """How many of the job's most recently finished cases, counting back from the last, ended without a proposal."""
+    finished = []
+    for path in job.glob("*/result.json"):
+        try:
+            trial = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        proposals = ((trial.get("verifier_result") or {}).get("rewards") or {}).get("proposals")
+        finished.append((trial.get("finished_at") or "", bool(proposals)))
+    streak = 0
+    for _, proposed in sorted(finished, reverse=True):
+        if proposed:
+            break
+        streak += 1
+    return streak
 
 
 def run_all(commands: list[tuple[str, list[str]]]) -> int:
@@ -142,15 +200,28 @@ def run_all(commands: list[tuple[str, list[str]]]) -> int:
             model, cmd = pick
             name = cmd[cmd.index("--job-name") + 1]
             print(f"{datetime.now():%H:%M:%S} start  {name}", flush=True)
+            broken = False
             with (JOBS / f"{name}.log").open("w") as log:
                 # Harbor imports the plugin, and the plugin imports world/, so both need the repo on the path.
-                code = subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-                                      env={**__import__("os").environ, "PYTHONPATH": str(ROOT)}).returncode
-            print(f"{datetime.now():%H:%M:%S} finish {name}{'' if code == 0 else f' (exit {code})'}", flush=True)
+                job = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                                       env={**__import__("os").environ, "PYTHONPATH": str(ROOT)})
+                while job.poll() is None:
+                    threading.Event().wait(20)
+                    if not broken and without_proposal(JOBS / name) >= BROKEN_AFTER:
+                        broken = True
+                        job.terminate()
+                code = job.wait()
+            note = f" (stopped: its last {BROKEN_AFTER} cases ended without a proposal)" if broken else f" (exit {code})" if code else ""
+            print(f"{datetime.now():%H:%M:%S} finish {name}{note}", flush=True)
             with lock:
                 busy.discard(model)
-                if code:
+                if code or broken:
                     failed.append(name)
+                if broken:  # the provider is not answering for this model, so its other jobs would go the same way
+                    for dropped in [c for c in commands if c[0] == model]:
+                        commands.remove(dropped)
+                        failed.append(dropped[1][dropped[1].index("--job-name") + 1])
+                        print(f"{datetime.now():%H:%M:%S} not run {failed[-1]}", flush=True)
 
     threads = [threading.Thread(target=worker) for _ in range(JOBS_AT_ONCE)]
     for t in threads:
@@ -173,6 +244,7 @@ if __name__ == "__main__":
 
     chosen = take(extra, "-m") or DEFAULT_MODEL
     efforts = take(extra, "--efforts")
+    dataset = take(extra, "--dataset") or DATASET
     names = list(MODELS) if chosen == "all" else chosen.split(",")
     commit = git("rev-parse", "--short", "HEAD") + ("+" if git("status", "--porcelain") else "")
     agents = JOBS / "_agents" / f"{commit}-{stamp}"
@@ -185,7 +257,12 @@ if __name__ == "__main__":
         wanted = EFFORT_ORDER if efforts == "all" else efforts.split(",")
         plan = [(None if e == "default" else e, n) for e in wanted for n in names
                 if e == "default" or n not in MODELS or e in MODELS[n][1]]
-    commands = [(MODELS.get(n, (n,))[0], agent_command(graph, MODELS.get(n, (n,))[0], e, agents, commit, list(extra)))
+    commands = [(MODELS.get(n, (n,))[0], agent_command(graph, MODELS.get(n, (n,))[0], e, agents, commit, list(extra), dataset))
                 for e, n in plan]
+    keys = env_file()
+    wrong = {model: problem for model in dict.fromkeys(c[0] for c in commands) if (problem := unsound(model, keys))}
+    if wrong:
+        sys.exit("Nothing was started. These models did not answer a test question:\n"
+                 + "\n".join(f"  {model}: {problem}" for model, problem in wrong.items()))
     print(f"{len(commands)} jobs, {JOBS_AT_ONCE} at a time; each job's output is in {JOBS.relative_to(ROOT)}/<job name>.log", flush=True)
     sys.exit(run_all(commands))

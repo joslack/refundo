@@ -36,9 +36,13 @@ def chat_model(configurable: dict):
     name = configurable.get("model", DEFAULT_MODEL)
     settings = {"timeout": REQUEST_TIMEOUT, "max_retries": RETRIES} | dict(configurable.get("model_kwargs") or {})
     if pace := configurable.get("calls_per_minute"):
-        # This trial's share of the provider's tokens-per-minute limit, worked out by whoever started the run.
-        settings["rate_limiter"] = InMemoryRateLimiter(requests_per_second=pace / 60, check_every_n_seconds=0.1,
-                                                       max_bucket_size=1)
+        # Set by the runner only for models that would pass the provider's tokens-per-minute limit: this trial's
+        # share of that limit. The bucket starts full and holds half a minute of calls, so a call waits only once
+        # the trial has been calling faster than its share. A wait happens inside the model call and shows as
+        # model time in the trace.
+        limiter = InMemoryRateLimiter(requests_per_second=pace / 60, check_every_n_seconds=0.1, max_bucket_size=pace / 2)
+        limiter.available_tokens = pace / 2
+        settings["rate_limiter"] = limiter
     if name.startswith("openai:"):
         # Some OpenAI models accept tools only on the Responses API, so every OpenAI model goes through it.
         settings.setdefault("use_responses_api", True)
