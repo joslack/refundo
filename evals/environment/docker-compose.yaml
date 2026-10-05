@@ -1,4 +1,6 @@
-# Merged on top of Harbor's own compose file, which defines `main`, the agent's container.
+# The one environment every task in the dataset runs in. evals/run.py passes this file to Harbor,
+# which merges it on top of its own compose file; that one defines `main`, the agent's container.
+# Relative paths here are read from the task's environment folder, so ./seed.sql is that task's seed.
 services:
   main:
     depends_on:
@@ -6,11 +8,12 @@ services:
         condition: service_healthy
 
   postgres:
-    build:
-      context: ./postgres
+    image: postgres:16-alpine
     environment:
-      POSTGRES_PASSWORD: spike
+      POSTGRES_PASSWORD: refundo
       POSTGRES_DB: quillstack
+    volumes:
+      - ./seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
     healthcheck:
       # -h makes this wait for the real server, not the temporary one that runs the seed
       test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "quillstack"]
@@ -19,10 +22,9 @@ services:
       retries: 30
 
   mcp:
-    build:
-      context: ./mcp
+    image: refundo-mcp
     environment:
-      DATABASE_URL: postgresql://postgres:spike@postgres:5432/quillstack
+      DATABASE_URL: postgresql://postgres:refundo@postgres:5432/quillstack
     depends_on:
       postgres:
         condition: service_healthy

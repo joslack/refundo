@@ -1,4 +1,2 @@
 # Written by build.py
-task/instruction.md
-task/environment/postgres/seed.sql
-task/tests/expected.json
+tasks/
