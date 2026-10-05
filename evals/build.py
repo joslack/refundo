@@ -1,10 +1,10 @@
 """Build the Harbor dataset: three shared images, and one small task folder per scenario.
 
-    uv run python evals/build.py          the scenarios that have a hand label
-    uv run python evals/build.py --all    every scenario
+    uv run python evals/build.py
 
-The dataset is the hand-labeled scenarios by default: for those, a person and the oracle agree on the
-answer. The rest are checked only by tests written alongside the oracle.
+The dataset is every scenario. For 41 of them a person and the oracle agree on the answer; the rest are
+checked only by tests written alongside the oracle. evals/langsmith_plugin.py marks each one, so results
+can be read for either group.
 
 Everything a trial runs is defined once, in evals/environment/:
     refundo-main        the agent's container
@@ -26,12 +26,11 @@ verifier's image, and is mounted into the agent's container only when the oracle
 Run the tasks with evals/run.py.
 """
 
+import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
-from world.labeling import LABELS, load_labels
 from world.scenarios import ALL
 from world.sql import seed_sql
 
@@ -43,12 +42,13 @@ SOLVE_SH = "#!/bin/bash\n# evals/run.py mounts the reference solution here for o
 
 
 def build_images() -> None:
-    for image, context, dockerfile in [
-        ("refundo-main", ENVIRONMENT / "main", ENVIRONMENT / "main/Dockerfile"),
-        ("refundo-mcp", ENVIRONMENT / "mcp", ENVIRONMENT / "mcp/Dockerfile"),
-        ("refundo-verifier", ROOT, ENVIRONMENT / "verifier/Dockerfile"),
+    agent_deps = " ".join(json.loads((ROOT / "agents/langgraph.json").read_text())["dependencies"])
+    for image, context, dockerfile, args in [
+        ("refundo-main", ENVIRONMENT / "main", ENVIRONMENT / "main/Dockerfile", ["--build-arg", f"AGENT_DEPS={agent_deps}"]),
+        ("refundo-mcp", ENVIRONMENT / "mcp", ENVIRONMENT / "mcp/Dockerfile", []),
+        ("refundo-verifier", ROOT, ENVIRONMENT / "verifier/Dockerfile", []),
     ]:
-        subprocess.run(["docker", "build", "-q", "-t", image, "-f", str(dockerfile), str(context)], check=True)
+        subprocess.run(["docker", "build", "-q", "-t", image, "-f", str(dockerfile), *args, str(context)], check=True)
 
 
 def build_task(scenario, config: str) -> None:
@@ -65,12 +65,10 @@ def build_task(scenario, config: str) -> None:
 
 
 if __name__ == "__main__":
-    labeled = load_labels(LABELS / "jonah.jsonl")
-    scenarios = ALL if "--all" in sys.argv else [s for s in ALL if s.id in labeled]
     build_images()
     shutil.rmtree(TASKS, ignore_errors=True)
-    for scenario in scenarios:
+    for scenario in ALL:
         build_task(scenario, (HERE / "task.toml").read_text())
     # Harbor copies only agents/ into the agent's container, so the policy has to be inside it.
     (ROOT / "agents/policy.md").write_text((ROOT / "docs/policy.md").read_text())
-    print(f"built 3 images and {len(scenarios)} of {len(ALL)} scenarios as tasks in {TASKS.relative_to(ROOT)}/")
+    print(f"built 3 images and {len(ALL)} tasks in {TASKS.relative_to(ROOT)}/")
