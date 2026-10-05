@@ -22,3 +22,9 @@ deck/prep-notes.md
 process/*.local.*
 process/earlier-chat.txt
 process/convert_earlier_chat.py
+
+# Harbor's run output
+jobs/
+
+# Copied in by evals/build.py
+agents/policy.md

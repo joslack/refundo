@@ -1,0 +1,35 @@
+# Merged on top of Harbor's own compose file, which defines `main`, the agent's container.
+services:
+  main:
+    depends_on:
+      mcp:
+        condition: service_healthy
+
+  postgres:
+    build:
+      context: ./postgres
+    environment:
+      POSTGRES_PASSWORD: spike
+      POSTGRES_DB: quillstack
+    healthcheck:
+      # -h makes this wait for the real server, not the temporary one that runs the seed
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "quillstack"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  mcp:
+    build:
+      context: ./mcp
+    environment:
+      DATABASE_URL: postgresql://postgres:spike@postgres:5432/quillstack
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8000), timeout=2).close()"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
