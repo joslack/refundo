@@ -1,12 +1,16 @@
 """Facts: one charge and its Workspace, read from the records the way §2 defines things.
 
-    extract_facts(world, request) -> Facts
+    read_records(world, request, reading) -> Facts
 
 Everything a decision depends on is a field of Facts. world/oracle.py applies the policy to them and reads no
 record itself, so a rule can be checked against the policy without knowing how the records are laid out.
 
+The records do not hold everything: a few inputs are judgments about text, and they arrive as a Reading
+(world/reading.py). Nothing here looks at free text, at the `truth` annotations on ticket messages, or at the
+ground-truth fields of a Request. Of the request it uses the Workspace, who is asking and when.
+
 Each helper below answers one question the policy asks of the records, and returns the ids of the records behind
-its answer. extract_facts gathers those ids in `support`, so a decision can say what it rests on.
+its answer. read_records gathers those ids in `support`, so a decision can say what it rests on.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from world.reading import CancellationRequest, Reading, WrittenPromise
 from world.scenario import Request
 from world.schema import Interval, Invoice, Role, Workspace, World
 
@@ -39,8 +44,8 @@ class Facts(BaseModel):
     # §3 / §11
     dispute: Literal["none", "open", "customer_won", "quillstack_won"] = "none"
     tos_suspended: bool = False
-    mentions_legal: bool = False
-    reports_offrecord_promise: bool = False
+    mentions_legal: bool = False  # as the reading has it
+    reports_offrecord_promise: bool = False  # as the reading has it
     # §2 Usage
     usage_since_charge: bool = False
     usage_days_in_period: int = 0
@@ -65,18 +70,18 @@ def within(f: Facts, n_days: int) -> bool:
     return timedelta(0) <= f.now - f.charged_at <= timedelta(days=n_days)
 
 
-def extract_facts(world: World, request: Request) -> Facts:
-    """The facts about the charge the request names, as of the Request Time."""
+def read_records(world: World, request: Request, reading: Reading, charge: str | None = None) -> Facts:
+    """The facts about one charge as of the Request Time: the one the request is about, or another it describes."""
     now = request.received_at
     ws = next(w for w in world.workspaces if w.id == request.workspace_id)
-    inv = next(i for i in world.invoices if i.id == request.invoice_id)
+    inv = next(i for i in world.invoices if i.id == (charge or reading.charge))
     refunds = [r for r in world.refunds if r.charge_id == inv.charge_id and r.created <= now]
     dispute, disputes = _dispute(world, inv, now)
     sessions_since, usage_days = _usage(world, inv, now)
     duplicate_of = _duplicate_of(world, inv)
-    cancel_requests, cancel_completions = _cancellations(world, ws, inv)
+    cancel_requests, cancel_completions = _cancellations(world, ws, inv, reading.cancellation_requests)
     overcharge, undercharged = _seat_count(ws, inv)
-    promise, promise_ticket, promise_refunds = _written_promise(world, now)
+    promise, promise_ticket, promise_refunds = _written_promise(world, now, reading.written_promises)
     paid_months, goodwill_refunds, is_latest = _goodwill_history(world, inv, now)
     return Facts(
         now=now,
@@ -86,7 +91,7 @@ def extract_facts(world: World, request: Request) -> Facts:
         period_days=(inv.period_end - inv.period_start).days,
         dispute=dispute,
         tos_suspended=ws.status == "suspended" and ws.suspension_reason == "tos_violation",
-        mentions_legal=request.mentions_legal, reports_offrecord_promise=request.reports_offrecord_promise,
+        mentions_legal=reading.mentions_legal, reports_offrecord_promise=reading.reports_offrecord_promise,
         usage_since_charge=bool(sessions_since), usage_days_in_period=usage_days,
         duplicate_of=duplicate_of,
         cancel_requested_at=min((at for at, _ in cancel_requests), default=None),
@@ -163,11 +168,13 @@ def _duplicate_of(world: World, inv: Invoice) -> str | None:
                  and o.period_end == inv.period_end and o.created <= inv.created), None)
 
 
-def _cancellations(world: World, ws: Workspace, inv: Invoice) -> tuple[Stamped, Stamped]:
+def _cancellations(world: World, ws: Workspace, inv: Invoice,
+                   in_tickets: list[CancellationRequest]) -> tuple[Stamped, Stamped]:
     """§2 Confirmed Cancellation: the requests and the completed cancellations on record, each with its time.
 
     A request counts when the person who made it was the Owner or a Billing Admin at that moment, in the app or
-    in a ticket, even if it failed to process. A completed cancellation is read from the app event log and from
+    in a ticket, even if it failed to process. Which ticket messages ask to cancel comes from the reading; who
+    wrote each one and when come from the records. A completed cancellation is read from the app event log and from
     the billing system. A cancellation belongs to the subscription it cancelled: one from before the current
     subscription's first charge (the customer signed up again) says nothing about this charge.
     """
@@ -183,8 +190,9 @@ def _cancellations(world: World, ws: Workspace, inv: Invoice) -> tuple[Stamped, 
     requests = [(e.at, e.id) for e in world.app_events
                 if e.type in {"cancellation_requested", "cancellation_failed"} and current(e.at)
                 and may_cancel(e.actor_user_id, e.at)]
-    requests += [(m.at, t.id) for t in world.tickets for m in t.messages
-                 if m.truth.get("cancellation_request") and may_cancel(m.author_id, m.at) and current(m.at)]
+    asked = {(c.ticket_id, c.message) for c in in_tickets}
+    requests += [(m.at, t.id) for t in world.tickets for position, m in enumerate(t.messages)
+                 if (t.id, position) in asked and may_cancel(m.author_id, m.at) and current(m.at)]
     completions = [(e.at, e.id) for e in world.app_events if e.type == "cancellation_completed" and current(e.at)]
     sub = next((s for s in world.subscriptions if s.customer == ws.stripe_customer_id), None)
     if sub and sub.canceled_at and current(sub.canceled_at):
@@ -206,11 +214,14 @@ def _seat_count(ws: Workspace, inv: Invoice) -> tuple[int, bool]:
     return extra * (inv.subtotal - inv.discount) // inv.subtotal, False
 
 
-def _written_promise(world: World, now: datetime) -> tuple[int | None, str | None, list]:
+def _written_promise(world: World, now: datetime,
+                     in_tickets: list[WrittenPromise]) -> tuple[int | None, str | None, list]:
     """§4.4: the latest refund promise a support representative wrote in a ticket, that ticket, and the refunds
-    recorded against it. A refund issued for some other reason does not pay the promise."""
-    promises = [(m.truth["promise_cents"], t.id) for t in world.tickets for m in t.messages
-                if m.author_type == "support_agent" and "promise_cents" in m.truth and m.at <= now]
+    recorded against it. Which messages promise a refund, and how much, comes from the reading; who wrote each
+    one and when come from the records. A refund issued for some other reason does not pay the promise."""
+    promised = {(p.ticket_id, p.message): p.cents for p in in_tickets}
+    promises = [(promised[t.id, position], t.id) for t in world.tickets for position, m in enumerate(t.messages)
+                if (t.id, position) in promised and m.author_type == "support_agent" and m.at <= now]
     if not promises:
         return None, None, []
     cents, ticket = promises[-1]

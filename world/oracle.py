@@ -1,8 +1,12 @@
 """The oracle: reads a World the way the policy defines things, then applies the policy.
 
-Two steps, kept apart on purpose:
-    extract_facts(world, request) -> Facts     §2 definitions applied to raw records (world/facts.py)
-    decide(facts) -> Outcome                   §1's three steps over those facts
+Three steps, kept apart on purpose:
+    annotated(world, request) -> Reading             the judgments about text, as the scenario's author wrote them down
+    read_records(world, request, reading) -> Facts   §2 definitions applied to raw records (world/facts.py)
+    decide(facts) -> Outcome                         §1's three steps over those facts
+
+Only the first is particular to the oracle. decide_request takes any Reading, and from there on no step reads an
+annotation or free text.
 
 It implements every decision rule in docs/policy.md: §3, 4, 5, 6, 9, 10 and 11. §12 governs how
 replies are written, which is judged on the conversation and not here.
@@ -13,8 +17,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from math import ceil
 
-from world.facts import Facts, extract_facts
+from world.facts import Facts, read_records
 from world.facts import within as _within
+from world.reading import Reading, annotated
 from world.scenario import Action, Evidence, Outcome, Request
 from world.schema import World
 
@@ -228,13 +233,23 @@ def _out(c: _Claims, action: Action, amount: int, section: str, why: str) -> Out
                    records=_flatten(c), evidence=list(c.items), considered=list(c.sections))
 
 
+def extract_facts(world: World, request: Request) -> Facts:
+    """The facts about the charge a scenario's request names, read with the scenario's annotations."""
+    return read_records(world, request, annotated(world, request))
+
+
 def label(world: World, request: Request) -> Outcome:
-    """Decide the request. Each charge it describes is decided separately (§4), then the amounts are added."""
-    primary = decide(extract_facts(world, request))
-    if not request.also_invoice_ids or primary.action is Action.NO_ACTION:
+    """The answer key for a scenario. Its annotations stand in for reading the text; code does the rest."""
+    return decide_request(world, request, annotated(world, request))
+
+
+def decide_request(world: World, request: Request, reading: Reading) -> Outcome:
+    """Decide a request from its records and a reading of its text. Each charge it describes is decided
+    separately (§4), then the amounts are added."""
+    primary = decide(read_records(world, request, reading))
+    if not reading.other_charges or primary.action is Action.NO_ACTION:
         return primary
-    outs = [primary] + [decide(extract_facts(world, request.model_copy(update={"invoice_id": i})))
-                        for i in request.also_invoice_ids]
+    outs = [primary] + [decide(read_records(world, request, reading, charge)) for charge in reading.other_charges]
     grants = (Action.REFUND, Action.PARTIAL_REFUND, Action.CREDIT)
     owed = [o.proposed if o.action is Action.ESCALATE else o for o in outs]
     total = sum(o.amount_cents for o in owed if o and o.action in grants)
