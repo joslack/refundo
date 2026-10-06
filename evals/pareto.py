@@ -14,8 +14,9 @@ each job's name) and writes, to evals/results/<commit>/:
 
 An experiment is one agent graph, model and reasoning effort. Reward is the share of its trials where the action
 and the amount were both right. Where each case was run more than once (`run.py -k`), the reward is over all the
-trials, and results.csv also says how far a single run's score would stray from it (reward_sd) and how many cases
-were right every time, some of the time, and never. Cost per case is the experiment's tokens at the provider's
+trials, and results.csv also gives the spread between repeats (reward_sd) and how many cases were right every time,
+some of the time, and never. The spread counts only cases whose repeats disagree, so with a few repeats it is a lower
+bound: a case that fails one time in five still comes out right three times in three about half the time. Cost per case is the experiment's tokens at the provider's
 list price, divided by the number of trials. The charts show experiments that have every case, the same number of
 times.
 
@@ -173,7 +174,8 @@ def experiments(commit: str) -> list[dict]:
             "trials": len(trials), "repeats": min(times), "complete": len(by_case) == CASES and len(times) == 1,
             "reliable": model not in UNRELIABLE,
             "reward": share([t["right"] for t in trials]),
-            # One run of the 80 cases would land this many points from the reward, give or take, by chance alone.
+            # How far one pass over the cases strays from the reward, from the cases whose repeats disagree. A case
+            # that was right every time adds nothing, so this is a lower bound.
             "reward_sd": round(100 * sum(p * (1 - p) for p in rates) ** 0.5 / len(rates), 1) if repeated else "",
             "cases_always_right": sum(p == 1 for p in rates) if repeated else "",
             "cases_sometimes_right": sum(0 < p < 1 for p in rates) if repeated else "",
@@ -270,7 +272,7 @@ def pareto_chart(rows: list[dict], path: Path, top: bool = False) -> None:
     fig, ax = plt.subplots(figsize=(12, 6.8), dpi=160)
     style(ax, "Reward against cost per case" + (": the cheap, accurate corner" if top else ", by model and reasoning effort"),
           (f"Agent graph `{graphs[0]}`, " if len(graphs) == 1 else "") + f"{CASES} cases"
-          + (f", each run {min(repeats)} times; bars show how far a single run would stray" if repeats != {1} else "")
+          + (f", each run {min(repeats)} times; bars show the spread between repeats, a lower bound" if repeats != {1} else "")
           + ". Each point is one experiment; a line joins one model's reasoning efforts. Hollow point: no effort set.")
     ax.fill_between([left, middle_cost], middle_reward, 100, color="#dff5df", zorder=0,
                     label="Cheaper and better than the median experiment")
