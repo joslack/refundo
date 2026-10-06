@@ -4,9 +4,10 @@
 
 Reads the Harbor job folders in evals/jobs/ whose names carry the given commit (the one evals/run.py put in
 each job's name) and writes, to evals/results/<commit>/:
-    results.csv      one row per experiment: scores, calls, seconds, tokens, cost per case
+    results.csv      one row per experiment: scores, calls, seconds, tokens and cost per case
     cases.csv        one row per trial: what was proposed, how it scored, calls, seconds, tokens, cost
-    misses.csv       one row per case and experiment with a wrong trial: what was expected and what was given
+    misses.csv       one row per case and experiment with a wrong trial: what was expected, what was given, and
+                     which models missed the same case with the same agent
     pareto.png       reward against cost per case, one line per agent and model across its reasoning efforts
     pareto-top.png   the same, zoomed on the experiments that are cheap and at least 80% right
     index.png        reward against the Artificial Analysis Intelligence Index for the same model and effort
@@ -185,6 +186,9 @@ def experiments(commit: str) -> list[dict]:
             "model_calls_per_case": round(sum(t["model_calls"] for t in trials) / len(trials), 1),
             "tool_calls_per_case": round(sum(t["tool_calls"] for t in trials) / len(trials), 1),
             "agent_seconds_per_case": round(median(seconds), 1) if seconds and not paced else "",
+            "input_tokens_per_case": round(sum(t["input_tokens"] for t in trials) / len(trials)),
+            "cached_tokens_per_case": round(sum(t["cached_tokens"] for t in trials) / len(trials)),
+            "output_tokens_per_case": round(sum(t["output_tokens"] for t in trials) / len(trials)),
             "input_tokens": sum(t["input_tokens"] for t in trials), "cached_tokens": sum(t["cached_tokens"] for t in trials),
             "cache_write_tokens": sum(t["cache_write_tokens"] for t in trials),
             "output_tokens": sum(t["output_tokens"] for t in trials),
@@ -421,6 +425,12 @@ def misses(rows: list[dict]) -> list[dict]:
                         "right": len(trials) - len(wrong), "trials": len(trials),
                         "expected_action": expected[case][0], "expected_amount_cents": expected[case][1],
                         "given": "; ".join(f"{answer} ({n})" for answer, n in given.most_common())})
+    # A case that several models miss with one agent points at the agent or the case; one model alone, at the model.
+    together: dict[tuple[str, str], list[str]] = {}
+    for m in out:
+        together.setdefault((m["graph"], m["case"]), []).append(m["model"])
+    for m in out:
+        m["models_missing_with_this_graph"] = "; ".join(together[m["graph"], m["case"]])
     return sorted(out, key=lambda m: m["case"])
 
 
@@ -452,7 +462,7 @@ def write_csv(rows: list[dict], folder: Path) -> None:
     missed = misses(rows)
     with (folder / "misses.csv").open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["case", "graph", "model", "effort", "right", "trials", "expected_action",
-                                               "expected_amount_cents", "given"])
+                                               "expected_amount_cents", "given", "models_missing_with_this_graph"])
         writer.writeheader()
         writer.writerows(missed)
 
