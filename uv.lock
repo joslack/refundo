@@ -2224,6 +2224,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "deepagents" },
     { name = "fastmcp" },
+    { name = "langgraph" },
     { name = "langsmith" },
     { name = "streamlit" },
 ]
@@ -2238,6 +2239,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "deepagents", specifier = ">=0.7.21" },
     { name = "fastmcp", specifier = ">=4.0.11" },
+    { name = "langgraph", specifier = ">=1.2.12" },
     { name = "langsmith", specifier = ">=0.14.4" },
     { name = "streamlit", specifier = ">=1.65.0" },
 ]
