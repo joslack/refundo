@@ -395,7 +395,11 @@ def test_when_langsmith_stops_recording_one_job_no_other_is_started(jobs, harbor
     assert harbor.started[0].env["LANGSMITH_API_KEY"] == "test-key"  # `harbor jobs resume` reads no --env-file
     assert f"finish {first.name} (stopped: LangSmith is not taking its records: {LIMIT}): 1 results" in out
     assert "not run sql-glm-5p3-flash-high-abc1234-1005-120000" in out and "not run structured-gpt-6-luna-high-abc1234-1005-120000" in out
-    assert out.rstrip().endswith(f"uv run python evals/run.py resume {first.name}")
+    # The waiting jobs are taken off the list when the stop is decided, not when Harbor has finished stopping.
+    assert out.index("not run structured-gpt-6-luna-high") < out.index(f"finish {first.name}")
+    assert f"  uv run python evals/run.py resume {first.name}\n" in out
+    assert out.rstrip().endswith("naming their graphs and models:\n  sql-glm-5p3-flash-high-abc1234-1005-120000 "
+                                 "structured-gpt-6-luna-high-abc1234-1005-120000")
 
 
 def test_an_empty_account_drops_that_providers_jobs_and_no_others(jobs, harbor, monkeypatch, capsys):

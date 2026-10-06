@@ -103,7 +103,7 @@ blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--line); 
     <h2>Experiments</h2>
     <div class="scroll"><table id="summary"></table></div>
     <p class="legend">Right is the share of trials with the correct action and amount; the ± is how far a single pass over the 80 cases would stray from it by chance. Cases are counted by how many of their repeats were right. Tokens are averages per case, with the cached part of the input in brackets. Cost is tokens at the provider's list price. Tool calls include the two a fixed graph makes in code. No proposal counts trials that ended with nothing submitted. Started is local time.</p>
-    <p class="legend">Seconds is the median time the agent took on a case, over the number of trials in brackets: those with nothing else inside the time. Retried counts trials where a model call had to be sent again, and Trace refused those where LangSmith turned down the agent's trace; both keep their answer and are left out of Seconds, and where there are any the median of the trials left out is shown after a slash. Seconds is blank where every model call was paced to stay under a token limit. A ? after it means the model's client kept no log of calls it sent again in that experiment, so a retried call cannot be told from a slow one.</p>
+    <p class="legend">Seconds is the median time the agent took on a case, over the number of trials in brackets: those with nothing else inside the time. Retried counts trials where a model call had to be sent again, and trace refused those where LangSmith turned down the agent's trace; both keep their answer and are left out of Seconds, and where there are any the median of the trials left out is shown after a slash. Seconds is blank where every model call was paced to stay under a token limit. A ? after it means the model's client kept no log of calls it sent again in that experiment, so a retried call cannot be told from a slow one.</p>
     <p class="legend">Not run counts trials that a rate limit, a provider that did not answer, an account out of credits or a stopped job kept from running, with the reasons. They are not wrong answers and are in no figure on this page; an experiment with any shows fewer trials than planned.</p>
   </section>
 
@@ -172,8 +172,7 @@ const columns = [
   ["Model calls", (e) => e.model_calls, (e) => el("td", { class: "num", text: e.model_calls.toFixed(1) }), "num"],
   ["Tool calls", (e) => e.tool_calls, (e) => el("td", { class: "num", text: e.tool_calls.toFixed(1) }), "num"],
   ["No proposal", (e) => e.no_proposal, (e) => el("td", { class: "num", text: String(e.no_proposal) }), "num"],
-  ["Retried", (e) => e.retried, (e) => el("td", { class: "num", text: String(e.retried) }), "num"],
-  ["Trace refused", (e) => e.trace_refused, (e) => el("td", { class: "num", text: String(e.trace_refused) }), "num"],
+  ["Retried · trace refused", (e) => e.retried + e.trace_refused, (e) => el("td", { class: "num", text: `${e.retried} · ${e.trace_refused}` }), "num"],
   ["Not run", (e) => e.not_run, (e) => el("td", { class: "num" }, e.not_run ? [el("span", { class: "cell some", text: String(e.not_run) }),
     el("span", { class: "sub", text: " " + (e.not_run_reasons.includes(";") ? e.not_run_reasons : e.not_run_reasons.replace(/^\d+ /, "")) })] : "0"), "num"],
   ["Started", (e) => e.started, (e) => el("td", { class: "num", text: e.started }), "num"],

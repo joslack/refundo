@@ -424,7 +424,17 @@ def last_error(log: Path) -> str:
 
 def run_all(commands: list[tuple[str, str, list[str]]], keys: dict[str, str]) -> int:
     """Run the jobs a few at a time, in order, skipping past any whose model already has a job running."""
-    lock, busy, failed, again = threading.Lock(), set(), [], []
+    lock, busy, failed, again, unstarted = threading.Lock(), set(), [], [], []
+
+    def drop(model: str, scope: str) -> None:
+        """Take the waiting jobs that what stopped this model's job would stop too off the list."""
+        with lock:
+            for dropped in [c for c in commands if scope == "every" or c[0] == model
+                            or scope == "provider" and c[0].split("/")[0] == model.split("/")[0]]:
+                commands.remove(dropped)
+                failed.append(dropped[1])
+                unstarted.append(dropped[1])
+                print(f"{clock()} not run {dropped[1]}", flush=True)
 
     def worker() -> None:
         while True:
@@ -453,6 +463,7 @@ def run_all(commands: list[tuple[str, str, list[str]]], keys: dict[str, str]) ->
                         print(f"{clock()} notice {name}: {line}", flush=True)
                     if stopped is None and (stopped := why_stop(JOBS / name, rows, began, time.time())):
                         job.terminate()
+                        drop(model, stopped[0])  # now, not when Harbor has finished cancelling its trials
             rows = trials_of(JOBS / name, seen)
             error = "" if stopped or not code else last_error(JOBS / f"{name}.log")
             note = f" (stopped: {stopped[1]})" if stopped else f" (exit {code}{': ' + error if error else ''})" if code else ""
@@ -463,13 +474,6 @@ def run_all(commands: list[tuple[str, str, list[str]]], keys: dict[str, str]) ->
                     failed.append(name)
                 if (code or stopped or any(r["not_run"] for r in rows)) and (JOBS / name / "config.json").exists():
                     again.append(name)
-                if stopped:  # what stopped this job would stop these too
-                    scope = stopped[0]
-                    for dropped in [c for c in commands if scope == "every" or c[0] == model
-                                    or scope == "provider" and c[0].split("/")[0] == model.split("/")[0]]:
-                        commands.remove(dropped)
-                        failed.append(dropped[1])
-                        print(f"{clock()} not run {dropped[1]}", flush=True)
 
     threads = [threading.Thread(target=worker) for _ in range(JOBS_AT_ONCE)]
     for t in threads:
@@ -479,6 +483,9 @@ def run_all(commands: list[tuple[str, str, list[str]]], keys: dict[str, str]) ->
     if again:
         print("These jobs lack trials. Once what stopped them has passed, this runs the rest into the same experiments:\n"
               "  uv run python evals/run.py resume " + " ".join(again), flush=True)
+    if unstarted:
+        print("These jobs were not started, and have no folder to resume. Start them with the command that started this run, "
+              "naming their graphs and models:\n  " + " ".join(unstarted), flush=True)
     return len(failed)
 
 
