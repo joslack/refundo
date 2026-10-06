@@ -64,6 +64,39 @@ class Facts(BaseModel):
     on_monthly_plan: bool = True  # the Workspace's plan at the Request Time
     support: dict[str, list[str]] = {}  # fact name -> ids of the records behind it
 
+    @property
+    def owed(self) -> int:
+        """What is left of the charge after the refunds already issued on it."""
+        return self.amount_paid - self.already_refunded
+
+    @property
+    def cancel_requested_before_charge(self) -> bool:
+        """The Owner or a Billing Admin asked to cancel before the charge, whether or not it was processed."""
+        return self.cancel_requested_at is not None and self.cancel_requested_at < self.charged_at
+
+    @property
+    def cancelled_before_charge(self) -> bool:
+        """§2 Confirmed Cancellation before the charge. A request by the Owner or a Billing Admin settles it;
+        without one, the earliest completed cancellation that any system recorded counts."""
+        return self.cancel_requested_before_charge or any(t < self.charged_at for t in self.cancel_completed_at)
+
+    @property
+    def cancellation_records_conflict(self) -> bool:
+        """§2: with no request to settle it, two systems put the completed cancellation on opposite sides of the
+        charge."""
+        sides = {t < self.charged_at for t in self.cancel_completed_at}
+        return not self.cancel_requested_before_charge and len(sides) > 1
+
+    @property
+    def cancellation_records(self) -> list[str]:
+        """Every request to cancel and completed cancellation on record, whichever side of the charge it falls."""
+        return self.support["cancel_request"] + self.support["cancel_completed"]
+
+    @property
+    def promise_unpaid(self) -> int:
+        """What is still unpaid of a refund promised in a ticket."""
+        return (self.written_promise or 0) - self.promise_paid
+
 
 def within(f: Facts, n_days: int) -> bool:
     """§2 Within N days: no more than N x 24 hours from the charge to the Request Time."""
