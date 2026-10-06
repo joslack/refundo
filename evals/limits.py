@@ -193,6 +193,9 @@ class Unsent:
         self.path = path
         self._lock = threading.Lock()
         self.why = unsent(path)[0]  # a job resumed with writes still unsent adds to them, so they stay in order
+        if self.why and not path.read_text().endswith("\n"):  # so that the next write starts a line of its own
+            with path.open("a") as f:
+                f.write("\n")
 
     def close(self, why: str) -> bool:
         """Stop sending. Returns whether this call was the one that stopped it."""
@@ -215,11 +218,19 @@ def now() -> str:
 
 
 def unsent(path: Path) -> tuple[str, list[dict]]:
-    """Why a job's file of unsent writes was started ("" if there is none), and the writes."""
+    """Why a job's file of unsent writes was started ("" if there is none), and the writes. A line cut short by a
+    job that was killed while writing it is passed over."""
     try:
-        lines = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    except (OSError, ValueError):
+        text = path.read_text()
+    except OSError:
         return "", []
+    lines = []
+    for line in text.splitlines():
+        try:
+            lines.append(json.loads(line))
+        except ValueError:
+            continue
+    lines = [line for line in lines if isinstance(line, dict)]
     return next((line["closed"] for line in lines if "closed" in line), ""), [line for line in lines if "method" in line]
 
 

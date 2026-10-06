@@ -206,6 +206,18 @@ def test_refused_writes_are_kept_in_order_and_a_resumed_job_adds_to_them(tmp_pat
         ("POST", "/feedback", {"key": "reward"}, [200])]
 
 
+def test_a_line_cut_short_does_not_hide_the_writes_before_it(tmp_path):
+    kept = limits.Unsent(tmp_path / limits.UNSENT)
+    kept.close("Monthly unique traces usage limit exceeded")
+    kept.keep("POST", "/runs", {"id": "a"}, {200})
+    with kept.path.open("a") as f:
+        f.write('{"method": "PATCH", "path": "/runs/a", "json": {"end_ti')  # the job was killed here
+    why, writes = limits.unsent(kept.path)
+    assert why == "Monthly unique traces usage limit exceeded" and [w["json"] for w in writes] == [{"id": "a"}]
+    limits.Unsent(kept.path).keep("POST", "/runs", {"id": "b"}, {200})  # the job is started again and adds a write
+    assert [w["json"] for w in limits.unsent(kept.path)[1]] == [{"id": "a"}, {"id": "b"}]
+
+
 def kept_writes(tmp_path: Path, count: int) -> Path:
     kept = limits.Unsent(tmp_path / limits.UNSENT)
     kept.close("Monthly unique traces usage limit exceeded")
