@@ -102,7 +102,7 @@ blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--line); 
   <section>
     <h2>Experiments</h2>
     <div class="scroll"><table id="summary"></table></div>
-    <p class="legend">Right is the share of trials with the correct action and amount; the ± is how far a single pass over the 80 cases would stray from it by chance. Cases are counted by how many of their repeats were right. Seconds is the median time the agent took on a case. Tokens are averages per case, with the cached part of the input in brackets. Cost is tokens at the provider's list price. Tool calls include the two a fixed graph makes in code. No proposal counts trials that ended with nothing submitted. Retried counts trials where a model call had to be sent again. Started is local time.</p>
+    <p class="legend">Right is the share of trials with the correct action and amount; the ± is how far a single pass over the 80 cases would stray from it by chance. Cases are counted by how many of their repeats were right. Model seconds is the median time that a case spent in model calls, from the LangSmith traces. Agent seconds is the median time of the full agent run for a case. It includes the start of the agent process and the tool calls, and it changes with the load on the machine. Tokens are averages per case, with the cached part of the input in brackets. Cost is tokens at the provider's list price. Tool calls include the two a fixed graph makes in code. No proposal counts trials that ended with nothing submitted. Retried counts trials where a model call had to be sent again. Started is local time.</p>
   </section>
 
   <section>
@@ -159,7 +159,8 @@ const columns = [
   ["Model", (e) => e.model_name, (e) => el("td", {}, e.model_name, el("span", { class: "sub", text: " " + e.effort }))],
   ["Right", (e) => e.reward, (e) => el("td", { class: "num" }, el("span", { class: "bar" }, el("i", { style: `width:${e.reward}%` })), `${e.reward.toFixed(1)}%`, el("span", { class: "sub", text: e.reward_sd === null ? "" : ` ±${e.reward_sd.toFixed(1)}` })), "num"],
   [`Cases right ${D.repeats} of ${D.repeats} · some · none`, (e) => e.always ?? -1, (e) => el("td", { class: "num", text: e.always === null ? "" : `${e.always} · ${e.sometimes} · ${e.never}` }), "num"],
-  ["Seconds", (e) => e.seconds ?? 1e9, (e) => el("td", { class: "num", text: e.seconds === null ? "" : e.seconds.toFixed(1) }), "num"],
+  ["Model seconds", (e) => e.model_seconds ?? 1e9, (e) => el("td", { class: "num", text: e.model_seconds === null || e.model_seconds === undefined ? "" : e.model_seconds.toFixed(1) }), "num"],
+  ["Agent seconds", (e) => e.seconds ?? 1e9, (e) => el("td", { class: "num", text: e.seconds === null ? "" : e.seconds.toFixed(1) }), "num"],
   ["Cost", (e) => e.cost, (e) => el("td", { class: "num", text: "$" + e.cost.toFixed(4) }), "num"],
   ["Input tokens (cached)", (e) => e.input, (e) => el("td", { class: "num" }, e.input.toLocaleString("en-US"), el("span", { class: "sub", text: ` (${e.cached.toLocaleString("en-US")})` })), "num"],
   ["Output tokens", (e) => e.output, (e) => el("td", { class: "num", text: e.output.toLocaleString("en-US") }), "num"],

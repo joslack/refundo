@@ -1,0 +1,13 @@
+job,cases,wait_interval_seconds,model_seconds_per_case_estimated,model_seconds_per_call,waited_seconds_per_case
+case_file-deepseek-v4p1-flash-medium-6e71349-1005-212758,240,0.0,7.4,1.41,0.0
+case_file-glm-5p3-flash-high-6e71349-1005-212605,240,0.0,7.4,1.88,0.0
+case_file-gpt-6-luna-high-6e71349-1005-212758,240,0.0,8.4,2.29,0.0
+pipeline-deepseek-v4p1-flash-medium-6e71349-1005-212758,240,0.0,7.2,7.2,0.0
+pipeline-glm-5p3-flash-high-6e71349-1005-212605,240,0.0,15.8,15.77,0.0
+pipeline-gpt-6-luna-high-6e71349-1005-212758,240,0.0,6.4,6.43,0.0
+sql-deepseek-v4p1-flash-medium-6e71349-1005-172003,240,0.0,18.8,2.03,0.0
+sql-glm-5p3-flash-high-6e71349-1005-212605,240,0.0,13.6,1.36,0.0
+sql-gpt-6-luna-high-6e71349-1005-172003,241,0.0,19.1,2.78,0.0
+structured-deepseek-v4p1-flash-medium-6e71349-1005-212758,240,0.0,10.5,1.31,0.0
+structured-glm-5p3-flash-high-6e71349-1005-212605,240,0.0,7.5,1.37,0.0
+structured-gpt-6-luna-high-6e71349-1005-212758,240,0.0,14.9,2.4,0.0
