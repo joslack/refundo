@@ -206,7 +206,7 @@ class Unsent:
 
     def keep(self, method: str, path: str, body, ok_statuses) -> Kept:
         with self._lock, self.path.open("a") as f:
-            f.write(json.dumps({"method": method, "path": path, "json": body, "ok": sorted(ok_statuses), "at": now()}) + "\n")
+            f.write(json.dumps({"method": method, "path": path, "json": body, "ok": sorted(ok_statuses), "at": now()}, default=str) + "\n")
         return Kept()
 
 
