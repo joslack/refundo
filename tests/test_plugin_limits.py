@@ -167,6 +167,7 @@ def started(tmp_path: Path, a_job=None):
     """A plugin whose experiment exists, and the stand-in it talks to."""
     plugin = langsmith_plugin.Annotated(dataset_name="scratch", api_key="test-key", sync_dataset=False, graph="sql", model="gpt-6-luna",
                                         reasoning_effort="high", commit="abc1234", tools=["submit_proposal"], paced=False)
+    assert isinstance(plugin._session, limits.Guarded)  # every request goes through what raises on a usage limit
     there = LangSmith()
     plugin._session = limits.Guarded(there)
     plugin._setup(a_job or job(tmp_path))
@@ -359,6 +360,14 @@ def test_a_result_with_a_call_sent_again_or_a_refused_trace_keeps_its_scores_and
     plugin._create_feedback("run-2", Result(tmp_path, log="Failed to multipart ingest runs: langsmith.utils.LangSmithRateLimitError: "
                                                        + MONTHLY_TRACES))
     assert "agent_seconds" not in scores(there) and scores(there)["reward"] == 1.0
+
+
+def test_a_paced_jobs_trials_get_no_time(tmp_path):
+    """Each of its model calls may wait its turn under the provider's token limit, and the wait is in the time."""
+    plugin, there = started(tmp_path)
+    plugin._about["paced"] = True
+    plugin._create_feedback("run-1", Result(tmp_path))
+    assert scores(there) == {"reward": 1.0, "action": 1.0, "proposals": 1, "tool_calls": 1, "model_calls": 1}
 
 
 def test_a_trial_cut_off_with_no_sign_of_the_provider_is_scored(tmp_path):

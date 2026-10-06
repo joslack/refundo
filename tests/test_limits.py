@@ -86,6 +86,8 @@ EXTENDED_RETENTION = '{"error":"usage limit monthly_longlived_traces of 5000 exc
     # Harbor files a failed run under a rate limit when "rate limit" is anywhere in its output, and LangSmith's
     # refusal says it. The run's own error decides.
     ("ApiRateLimitError", TRACE_REFUSED + AGENTS_OWN + TRACE_REFUSED, ""),
+    ("NonZeroAgentExitCodeError", AGENTS_OWN + "langsmith.utils.LangSmithRateLimitError: Rate limit exceeded for "
+     "https://api.smith.langchain.com/runs/multipart.\n", ""),  # LangSmith's own error, printed after the run's
     ("AgentTimeoutError", OVERLOADED, limits.SILENT),
     ("AgentTimeoutError", TIMED_OUT + TIMED_OUT, limits.SILENT),
     ("AgentTimeoutError", OPENAI_AGAIN, limits.SILENT),

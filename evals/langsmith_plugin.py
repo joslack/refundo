@@ -26,8 +26,8 @@ It also changes what Harbor's plugin does:
 - A trial that was not run (evals/limits.py: the provider refused or never answered, the account was out of
   credits, the job was stopped) gets no scores. Its run carries the error and a not_run score that names the
   reason, so the experiment's reward is over the trials that were run.
-- A trial with a model call sent again, or with its trace refused, gets no agent_seconds score: the waits are
-  inside the time.
+- A trial with a model call sent again, or with its trace refused, gets no agent_seconds score, and neither
+  does any trial of a job whose model calls are paced: the waits are inside the time.
 - A write LangSmith refuses for a usage limit is not sent again. Harbor's plugin sends a refused request five
   more times over 31 seconds, and a trial waits on that at its start, its agent's start and its grader's start;
   a monthly limit does not lift in that time. The write is kept in the job's folder (langsmith-unsent.jsonl),
@@ -207,7 +207,7 @@ class Annotated(LangSmithPlugin):
                 "value": state["not_run"], "feedback_source_type": "api"})
             return
         super()._create_feedback(run_id, result)
-        for key, score in measures(result, timed=limits.clean(state)).items():
+        for key, score in measures(result, timed=limits.clean(state) and not self._about["paced"]).items():
             self._request("POST", "/feedback", ok_statuses={200, 201, 409}, json={
                 "id": self._stable_uuid(run_id, "feedback", key), "run_id": run_id, "key": key, "score": score,
                 "feedback_source_type": "api"})
