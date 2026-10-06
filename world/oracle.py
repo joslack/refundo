@@ -15,7 +15,6 @@ replies are written, which is judged on the conversation and not here.
 from __future__ import annotations
 
 from world.facts import Facts, read_records
-from world.facts import within as _within  # noqa: F401  tests/test_tools.py checks the tools' windows against it
 from world.graph import ESCALATION_CAP_CENTS, walk
 from world.reading import Reading, annotated
 from world.scenario import Action, Outcome, Request

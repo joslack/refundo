@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from world.oracle import _within, extract_facts
+from world.facts import within
+from world.oracle import extract_facts
 from world.scenarios import ALL
 from world.sql import tables
 
@@ -78,4 +79,4 @@ def test_case_file_timing_matches_the_oracle(scenario):
     elapsed = timing["time_from_charge_to_request"]
     assert elapsed["whole_days_rounded_up"] == ceil((facts.now - facts.charged_at) / timedelta(days=1))
     for days in (7, 14, 30, 90):  # every window the policy names
-        assert (0 <= elapsed["hours"] <= days * 24) == _within(facts, days)
+        assert (0 <= elapsed["hours"] <= days * 24) == within(facts, days)
