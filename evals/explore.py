@@ -7,7 +7,9 @@
 Reads the same job folders as evals/pareto.py and writes evals/jobs/explore-<commit>.html, one file with its data
 inside. The page has three parts:
 
-    Experiments              one row per agent and model: accuracy, seconds, tokens, cost and calls per case
+    Experiments              one row per agent and model: accuracy, seconds, tokens, cost and calls per case.
+                             Seconds in model calls come from results/<commit>/latency.csv, where
+                             evals/latency.py has written it
     Cases with a wrong answer    which models missed a case with one agent, or which agents missed it at all
     One case                 what was expected, and for every trial what it proposed, its rationale, its reply to
                              the customer and, for a wrong one, its tool calls in order
@@ -19,6 +21,7 @@ ignores, and not under results/. --bare writes the page without the outer docume
 takes.
 """
 
+import csv
 import json
 import sys
 import warnings
@@ -108,6 +111,8 @@ def data(commit: str, notes: list[str], planned: int | None = None) -> dict:
     def number(value):
         return None if value == "" else value
 
+    timed = HERE / "results" / commit / "latency.csv"
+    model_seconds = {r["job"]: float(r["model_seconds_per_case_estimated"]) for r in csv.DictReader(timed.open())} if timed.exists() else {}
     experiments = []
     for r in rows:
         started = (pareto.read_json(JOBS / r["job"] / "result.json") or {}).get("started_at")
@@ -116,6 +121,7 @@ def data(commit: str, notes: list[str], planned: int | None = None) -> dict:
             "trials": r["trials"], "complete": r["complete"], "reward": r["reward"], "reward_sd": number(r["reward_sd"]),
             "always": number(r["cases_always_right"]), "sometimes": number(r["cases_sometimes_right"]),
             "never": number(r["cases_never_right"]), "seconds": number(r["agent_seconds_per_case"]),
+            "model_seconds": model_seconds.get(r["job"]),
             "cost": r["cost_per_case_usd"], "input": r["input_tokens_per_case"], "cached": r["cached_tokens_per_case"],
             "output": r["output_tokens_per_case"], "model_calls": r["model_calls_per_case"],
             "tool_calls": r["tool_calls_per_case"], "no_proposal": r["no_proposal"], "retried": retried(JOBS / r["job"]),
