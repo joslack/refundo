@@ -1,8 +1,8 @@
-"""The verifier's image installs the packages these tests run against, at the same versions.
+"""The images that run the oracle install the packages these tests run against, at the same versions.
 
-The answer key is computed in that image. If it installed a different version of anything world/ imports, the
-tests here would be checking code the grader does not run. `uv run` installs what uv.lock names, so the versions
-installed in this environment are the lock's.
+The answer key is computed in the verifier's image. If it installed a different version of anything world/
+imports, the tests here would be checking code the grader does not run. `uv run` installs what uv.lock names, so
+the versions installed in this environment are the lock's.
 """
 
 import re
@@ -42,3 +42,9 @@ def test_the_verifier_pins_every_package_the_oracle_imports_at_the_locked_versio
     pinned = pins((ENVIRONMENT / "verifier/requirements.txt").read_text())
     assert set(pinned) == installed_with(WORLD_IMPORTS)
     assert pinned == {name: version(name) for name in pinned}
+
+
+def test_the_agent_image_installs_the_locked_langgraph_for_the_reference_solution():
+    """evals/environment/solve.py runs the oracle in the agent's container on oracle runs, and nothing it submits
+    is graded by that copy: the verifier grades it against its own."""
+    assert f"pip install --no-cache-dir langgraph=={version('langgraph')}\n" in (ENVIRONMENT / "main/Dockerfile").read_text()

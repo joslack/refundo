@@ -19,4 +19,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && rm -rf /tmp/warm
 ENV UV_OFFLINE=1
 
+# The reference solution also walks the oracle's graph, with the system Python. This is the last layer, so that
+# adding it leaves the layer above as it was built and the agents' packages stay the ones already downloaded.
+RUN pip install --no-cache-dir langgraph==1.2.12
+
 WORKDIR /app
