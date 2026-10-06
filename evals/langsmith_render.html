@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Refundo trial page</title>
+<!--
+A renderer for LangSmith's custom output rendering (docs.langchain.com/langsmith/custom-output-rendering).
+
+LangSmith loads this page from an https address, in a frame sandboxed to scripts and the page's own origin, in place of
+its own view of a run's output. When the frame has loaded, and five more times over the next three seconds, it posts
+    { type: "output" | "reference", data: <a run's outputs, or an example's reference outputs>, metadata: { inputs } }
+The page holds no data. It draws what it is sent:
+
+    a trial's outputs   as evals/langsmith_plugin.py records them: what the agent proposed beside the grader's scores,
+                        the customer's message, the rationale, the reply to the customer and the tokens
+    an answer key       an example's reference outputs: action, amount, sections and the reason
+    anything else       the fields as sent, so a run from another project can still be read
+
+A frame is sent one run, or one answer key. The proposal is shown beside the answer key where the key reaches the page:
+in the same frame, or in another frame of this page on the same screen, which passes it on. Scores other than the
+grader's, other runs and the experiment are not sent, so what the page shows across runs it reads from files of its own:
+
+    ?journeys=<url>      the tool calls of every trial, as evals/journeys.py writes them:
+                         {"commit", "trials": {<trial name>: {"case", "graph", "model", "effort", "right", "steps"}}}, where
+                         steps is a list of steps and a step is the list of labels of the calls one model message made.
+                         The page shows the run's own steps, and its experiment's trials merged while their steps agree.
+    ?results=<url>       the folder that holds results.csv and cases.csv, the tables evals/pareto.py writes. Without it
+                         the page reads results/<commit>/ beside itself, taking the commit from the run's outputs. It
+                         shows the run's case in every experiment, and every experiment's share right against its cost.
+    ?theme=light|dark    the theme; without it the page follows the system's
+
+An address is resolved against this page's. A run is found in the files by its trial name.
+
+LangSmith takes the page's address in a dataset's, a tracing project's or an annotation queue's Custom Output Rendering
+setting. To serve it from this machine, put this page, the journeys file and results/<commit>/ in one folder, and keep
+the key outside it:
+
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 30 -keyout key.pem -out cert.pem \
+        -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -addext "extendedKeyUsage=serverAuth"
+    python3 -m http.server 8765 --bind 127.0.0.1 --directory <folder> --tls-cert cert.pem --tls-key key.pem
+
+The address is then https://localhost:8765/langsmith_render.html?journeys=<file>. The browser has to trust cert.pem
+before it will load the frame. Ctrl-C stops the server. The server's TLS options came with Python 3.14.
+
+evals/langsmith_render_harness.py writes a page that sends this one real payloads without LangSmith.
+-->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one column for a frame about 480px wide and 300 to 600px tall, the verdict first. The tokens and type are
+   those of evals/explore_page.html. --dim is the gray of chart marks that are not this run's. */
+:root {
+  --bg: #f4f6f8; --surface: #ffffff; --ink: #16202b; --muted: #5b6978; --line: #d7dde4; --accent: #0b6e69;
+  --good: #1c7449; --good-bg: #e2f2e9; --part: #8f5a00; --part-bg: #fbeed3; --bad: #b0271f; --bad-bg: #fbe3e1;
+  --dim: #8a95a1;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141a; --surface: #171e26; --ink: #e6eaef; --muted: #98a5b3; --line: #2a3440; --accent: #58c4bc;
+    --good: #72d19b; --good-bg: #16321f; --part: #e8b75a; --part-bg: #392d12; --bad: #f39088; --bad-bg: #3c1a18;
+    --dim: #626e7b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141a; --surface: #171e26; --ink: #e6eaef; --muted: #98a5b3; --line: #2a3440; --accent: #58c4bc;
+  --good: #72d19b; --good-bg: #16321f; --part: #e8b75a; --part-bg: #392d12; --bad: #f39088; --bad-bg: #3c1a18;
+  --dim: #626e7b;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--surface); color: var(--ink); font-family: var(--sans); font-size: 13px; line-height: 1.45; }
+main { padding: 12px 14px 20px; display: flex; flex-direction: column; gap: 14px; max-width: 880px; }
+section { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+section:empty { display: none; }
+h1 { font-family: var(--mono); font-size: 15px; font-weight: 500; margin: 0; }
+h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0; }
+p { margin: 0; }
+.head { display: flex; flex-wrap: wrap; gap: 5px 8px; align-items: center; }
+.tag { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 0 6px; white-space: nowrap; }
+.tag.name, th.code { text-transform: none; letter-spacing: 0; font-family: var(--mono); font-size: 11.5px; font-weight: 500; }
+.chip { font-size: 12px; padding: 0 7px; border-radius: 3px; white-space: nowrap; }
+.chip.ok { background: var(--good-bg); color: var(--good); }
+.chip.no { background: var(--bad-bg); color: var(--bad); }
+.chip.na { border: 1px solid var(--line); color: var(--muted); }
+.code { font-family: var(--mono); font-size: 12.5px; }
+.sub { color: var(--muted); }
+.note { color: var(--muted); font-size: 12px; max-width: 80ch; }
+.meta { color: var(--muted); font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.text { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 80ch; }
+blockquote { margin: 0; padding-left: 10px; border-left: 3px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; max-width: 80ch; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 4px 12px 4px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+th { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); white-space: nowrap; }
+tbody tr:last-child > * { border-bottom: 0; }
+td.num, th.num { text-align: right; }
+td.num { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+.cmp { width: 100%; max-width: 640px; }
+.cmp td { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.cmp td:last-child, .cmp th:last-child { padding-right: 0; white-space: nowrap; }
+.unnamed { text-decoration: underline wavy var(--bad); text-underline-offset: 3px; }
+.pair { display: grid; grid-template-columns: minmax(70px, max-content) minmax(0, 1fr); gap: 3px 14px; margin: 0; }
+.pair dt { color: var(--muted); overflow-wrap: anywhere; }
+.pair dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+pre.json { margin: 0; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; background: var(--bg); border-radius: 4px; padding: 6px 8px; }
+.tiles { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0; }
+.tiles div { display: flex; flex-direction: column; }
+.tiles dt { font-size: 11px; color: var(--muted); }
+.tiles dd { margin: 0; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.tiles dd small { font-size: 11.5px; font-weight: 400; color: var(--muted); }
+.steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.steps li { display: flex; gap: 6px; align-items: baseline; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); padding: 2px 7px; font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; min-width: 0; }
+.steps i, .tree i { font-style: normal; color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+.tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.tree li { min-width: 0; }
+.tree li.fork { margin-left: 4px; padding-left: 8px; border-left: 2px solid var(--line); }
+.tree li.fork.on { border-left-color: var(--accent); }
+.tree .line, .tree summary { display: flex; flex-wrap: wrap; gap: 1px 8px; align-items: baseline; }
+.tree summary { cursor: pointer; list-style: none; color: inherit; font-size: inherit; }
+.tree summary::-webkit-details-marker { display: none; }
+.tree summary::before { content: "+"; font-family: var(--mono); color: var(--muted); width: 8px; }
+.tree details[open] > summary::before { content: "\2212"; }
+.tree details > .tree { margin-top: 3px; }
+.tree .what { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; min-width: 0; }
+.tree li.on > .line > .what, .tree li.on > details > summary > .what { font-weight: 600; }
+.tree .sub { font-size: 11.5px; white-space: nowrap; }
+.share { display: inline-flex; gap: 2px; height: 6px; align-self: center; flex: none; }
+.share b { border-radius: 2px; background: var(--good); min-width: 1px; }
+.share b.wrong { background: var(--bad); }
+details > summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cell { display: inline-block; min-width: 30px; text-align: center; padding: 0 6px; border-radius: 3px; font-family: var(--mono); font-size: 12px; }
+.cell.all { background: var(--good-bg); color: var(--good); }
+.cell.some { background: var(--part-bg); color: var(--part); }
+.cell.none { background: var(--bad-bg); color: var(--bad); }
+.cell.here { outline: 2px solid var(--accent); outline-offset: 1px; }
+tr.here td { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.chart { position: relative; max-width: 560px; }
+.chart svg { display: block; width: 100%; height: auto; }
+.chart text { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+.chart text.name { font-family: var(--sans); font-size: 11px; fill: var(--ink); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .mark { fill: var(--dim); stroke: var(--surface); stroke-width: 2; }
+.chart .spread { stroke: var(--dim); stroke-width: 1; }
+.chart .mine .mark { fill: var(--accent); }
+.chart .mine .spread { stroke: var(--accent); }
+.chart .near .mark { stroke: var(--ink); }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--surface); padding: 3px 7px; border-radius: 4px; font-size: 11.5px; line-height: 1.35; white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); }
+.tip b { display: block; font-weight: 600; }
+.key { display: flex; flex-wrap: wrap; gap: 2px 14px; color: var(--muted); font-size: 11.5px; }
+.key span { display: inline-flex; align-items: center; gap: 5px; }
+.key svg { width: 12px; height: 12px; }
+.key .mark { fill: var(--dim); }
+.key .mine .mark { fill: var(--accent); }
+</style>
+</head>
+<body>
+<main id="view"><p class="sub">The page waits for a message from LangSmith.</p></main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function build(node, attrs, kids) {
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "text") node.textContent = v; else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat(Infinity)) if (kid !== null && kid !== undefined && kid !== false) node.append(kid);
+  return node;
+}
+const el = (tag, attrs = {}, ...kids) => build(document.createElement(tag), attrs, kids);
+const svg = (tag, attrs = {}, ...kids) => build(document.createElementNS("http://www.w3.org/2000/svg", tag), attrs, kids);
+const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+const empty = (v) => v === null || v === undefined || v === "" || (typeof v === "object" && Object.keys(v).length === 0);
+const number = (v) => (typeof v === "number" || (typeof v === "string" && v.trim() !== "")) && Number.isFinite(Number(v)) ? Number(v) : null;
+const count = (n) => n.toLocaleString("en-US");
+const dollars = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (cents) => number(cents) === null ? "no amount" : dollars(number(cents) / 100);
+const words = (v) => typeof v === "string" ? v : Array.isArray(v) ? v.map((b) => isObject(b) && typeof b.text === "string" ? b.text : "").join("") : "";
+// Sections as a list, whether they came as a list or as the JSON text of one.
+function sectionsOf(v) {
+  if (typeof v === "string") { try { v = JSON.parse(v); } catch (e) { v = v.split(","); } }
+  return Array.isArray(v) ? v.map((s) => String(s).trim()).filter(Boolean) : [];
+}
+
+const params = new URLSearchParams(location.search);
+if (["light", "dark"].includes(params.get("theme"))) document.documentElement.setAttribute("data-theme", params.get("theme"));
+
+// What this frame has been sent: the latest message of each type, each as { data, inputs, task, text }; the answer
+// keys other frames passed on, by task; and the files read so far, by address.
+const state = { output: null, reference: null, shared: {}, files: {} };
+// Kept across redraws, and filled again when a file arrives.
+const tiles = el("section"), strip = el("section"), tree = el("section"), board = el("section");
+
+// A trial's outputs carry Harbor's fields. An answer key is an action with an amount or sections and none of them.
+const isTrial = (d) => isObject(d) && ["trial_name", "rewards", "reply", "agent_metadata"].some((k) => k in d);
+const isAnswer = (d) => isObject(d) && "action" in d && ("amount_cents" in d || "sections" in d) && !isTrial(d);
+const trialEntry = () => state.output && isTrial(state.output.data) ? state.output : null;
+// LangSmith has sent reference outputs under either type, so an output that is an answer key is read as one.
+function keyEntry() {
+  if (state.reference && isAnswer(state.reference.data)) return state.reference;
+  return state.output && !state.reference && isAnswer(state.output.data) ? state.output : null;
+}
+function keyFor(trial) {
+  const key = keyEntry();
+  if (key && (!key.task || !trial.task || key.task === trial.task)) return key.data;
+  return state.shared[trial.task] || null;
+}
+function taskOf(data, inputs) {
+  const name = [data, inputs].map((o) => isObject(o) && typeof o.task_name === "string" ? o.task_name : "").find(Boolean) || "";
+  return name.split("/").pop();
+}
+// The run's inputs carry the trial's name in a run's own pane. The outputs carry it everywhere.
+const trialName = (trial) => [trial.data.trial_name, trial.inputs.trial_name].find((name) => typeof name === "string" && name) || null;
+
+// ---- messages
+function receive(message) {
+  const inputs = isObject(message.metadata) && isObject(message.metadata.inputs) ? message.metadata.inputs : {};
+  let text;
+  try { text = JSON.stringify([message.data, inputs]); } catch (e) { text = null; }
+  const last = state[message.type];
+  if (last && text !== null && last.text === text) return;  // the same message, sent again
+  const entry = { data: message.data, inputs, task: taskOf(message.data, inputs), text };
+  // A frame put to use for another run: a key that does not say which case it is for belonged to the run before.
+  if (message.type === "output" && state.output && state.reference && !state.reference.task && state.output.task !== entry.task) state.reference = null;
+  state[message.type] = entry;
+  share();
+  draw();
+}
+// To the other frames on the same screen that this page's origin also serves. A frame with no origin of its own,
+// one whose sandbox takes it away or one opened from a file, can address no one, and the call throws.
+function tell(message, target) {
+  try {
+    const frames = target ? [target] : Array.from({ length: parent.frames.length }, (_, i) => parent.frames[i]).filter((w) => w !== window);
+    for (const frame of frames) frame.postMessage(message, location.origin);
+  } catch (e) {}
+}
+function share() {
+  const key = keyEntry(), trial = trialEntry();
+  if (key && key.task) tell({ refundo: "key", task: key.task, data: key.data });
+  if (trial && trial.task && !keyFor(trial)) tell({ refundo: "want", task: trial.task });
+}
+function fromFrame(message, source) {
+  const key = keyEntry();
+  if (message.refundo === "want" && key && key.task && key.task === message.task) tell({ refundo: "key", task: key.task, data: key.data }, source);
+  if (message.refundo !== "key" || typeof message.task !== "string" || !isAnswer(message.data)) return;
+  state.shared[message.task] = message.data;
+  const trial = trialEntry();
+  if (trial && trial.task === message.task) draw();
+}
+window.addEventListener("message", (event) => {
+  const message = event.data;
+  if (!isObject(message)) return;
+  if (message.refundo) { if (event.origin === location.origin && event.source !== window) fromFrame(message, event.source); }
+  else if (message.type === "output" || message.type === "reference") receive(message);
+});
+setTimeout(() => {
+  if (!state.output && !state.reference) $("view").replaceChildren(el("p", { class: "sub", text: "LangSmith sent no message. This page shows the output of one trial. If you open the page directly, the page shows no data." }));
+}, 8000);
+
+// ---- files
+// What the page has read from beside itself, by address: { loading }, { missing: why }, or what the file held.
+function fetched(address, read) {
+  if (!state.files[address]) {
+    state.files[address] = { loading: true };
+    read().catch((e) => ({ missing: String(e && e.message || e) })).then((found) => { state.files[address] = found; drawTiles(); drawJourneys(); drawBoard(); });
+  }
+  return state.files[address];
+}
+async function get(address, kind) {
+  const response = await fetch(address);
+  if (!response.ok) throw new Error(`the server sent status ${response.status}`);
+  return response[kind]();
+}
+// Rows of a CSV file as objects keyed by its header. A quoted field may hold commas, quotes and line breaks.
+function rows(text) {
+  const table = [];
+  let row = [], field = "", quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) { if (c !== '"') field += c; else if (text[i + 1] === '"') { field += '"'; i++; } else quoted = false; }
+    else if (c === '"') quoted = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(field); table.push(row); row = []; field = ""; }
+    else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); table.push(row); }
+  const [header, ...body] = table;
+  return header ? body.filter((r) => r.length === header.length).map((r) => Object.fromEntries(header.map((k, i) => [k, r[i]]))) : [];
+}
+// The folder of tables for a trial: the one named in the address, or the one for the commit its agent code was
+// copied at, which evals/run.py writes into the name of that copy.
+function folderOf(t) {
+  if (params.get("results")) return params.get("results").replace(/\/?$/, "/");
+  const copy = isObject(t.agent_metadata) && typeof t.agent_metadata.langgraph_project_path === "string" ? t.agent_metadata.langgraph_project_path : "";
+  const commit = /(?:^|[\\/])([0-9a-f]{7,40}\+?)-\d{4}-\d{6}[\\/]?$/.exec(copy);
+  return commit ? `results/${encodeURIComponent(commit[1])}/` : null;
+}
+// This trial's row in cases.csv. A trial run twice keeps its name, so the row counts only if its tokens are this run's.
+function rowOf(t) {
+  const tables = state.files[folderOf(t)];
+  if (!tables || !tables.cases || typeof t.trial_name !== "string") return null;
+  const row = tables.cases.find((r) => r.trial === t.trial_name);
+  const tokens = isObject(t.tokens) ? t.tokens : {};
+  const same = (mine, theirs) => number(mine) === null || number(theirs) === null || number(mine) === number(theirs);
+  return row && same(tokens.input, row.input_tokens) && same(tokens.output, row.output_tokens) ? row : null;
+}
+
+// ---- views
+function draw() {
+  const trial = trialEntry(), key = keyEntry();
+  const beside = key && key === state.reference ? state.output : null;
+  document.title = [trial ? trial.task : key ? key.task : "", "Refundo trial page"].filter(Boolean).join(" · ");
+  if (trial) $("view").replaceChildren(...trialView(trial, keyFor(trial)));
+  else if (key && (!beside || empty(beside.data))) $("view").replaceChildren(...keyView(key));
+  else $("view").replaceChildren(...plainView());
+}
+
+const block = (title, ...kids) => el("section", {}, el("h2", { text: title }), kids);
+const chip = (ok, text, title) => el("span", { class: "chip " + (ok === null ? "na" : ok ? "ok" : "no"), title, text });
+const cited = (list) => list.length ? list.map((s) => "§" + s).join(" ") : "none";
+
+function trialView({ data: t, inputs, task }, key) {
+  const scores = isObject(t.rewards) ? t.rewards : null;
+  const submitted = !empty(t.action) || number(t.amount_cents) !== null || sectionsOf(t.sections).length > 0;
+  const score = (name) => scores && typeof scores[name] === "number" ? scores[name] === 1 : null;
+  const picked = sectionsOf(t.sections), wanted = key ? sectionsOf(key.sections) : [];
+  const owed = key ? number(key.amount_cents) || 0 : null, gave = number(t.amount_cents);
+  // The grader's scores where the run has them. Without them the action and the amount are compared here; whether
+  // the sections agree takes more than the answer key holds.
+  const marks = scores || !key || !submitted ? { action: score("action"), amount: score("amount"), sections: score("sections") }
+    : { action: t.action === key.action, amount: gave === owed, sections: null };
+  const mark = (name) => !submitted ? "" : marks[name] === null ? chip(null, "no score") : chip(marks[name], marks[name] ? "right" : "wrong");
+  const apart = key && submitted && gave !== null && gave !== owed ? el("span", { class: "sub", text: ` ${dollars(Math.abs(gave - owed) / 100)} ${gave > owed ? "more" : "less"}`,
+    title: `The proposal amount is ${dollars(Math.abs(gave - owed) / 100)} ${gave > owed ? "more" : "less"} than the answer key amount.` }) : null;
+  const named = (s) => picked.includes(s) || picked.includes(s.split(".")[0]);
+  const row = (name, mine, theirs, verdict) => el("tr", {}, el("th", { scope: "row", text: name }), el("td", {}, mine), key ? el("td", {}, theirs) : null, el("td", {}, verdict));
+  const none = () => el("span", { class: "sub", text: "–" });
+  const graph = isObject(t.agent_metadata) && typeof t.agent_metadata.langgraph_graph === "string" ? t.agent_metadata.langgraph_graph : null;
+  const model = typeof inputs.model === "string" ? inputs.model.split("/").pop() : null;
+  const error = isObject(t.exception) ? t.exception : null;
+
+  const head = el("div", { class: "head" }, el("h1", { text: task || "trial" }),
+    score("reward") === null ? null : chip(score("reward"), score("reward") ? "right" : "wrong", "If the action and the amount are right, the trial is right."),
+    !submitted ? chip(null, "no proposal") : null,
+    error ? chip(false, String(error.exception_type || "error")) : null,
+    graph ? el("span", { class: "tag name", text: "agent " + graph }) : null, model ? el("span", { class: "tag name", text: model }) : null,
+    typeof t.trial_name === "string" ? el("span", { class: "meta", text: t.trial_name }) : null);
+
+  const compared = el("section", {}, el("table", { class: "cmp" },
+    el("thead", {}, el("tr", {}, el("th", {}), el("th", { scope: "col", text: "Proposal" }), key ? el("th", { scope: "col", text: "Answer key" }) : null,
+      el("th", { scope: "col", text: "Result" }))),
+    el("tbody", {},
+      row("Action", submitted && !empty(t.action) ? String(t.action) : none(), key ? (empty(key.action) ? "none" : String(key.action)) : null, mark("action")),
+      row("Amount", submitted ? money(t.amount_cents) : none(), key ? dollars(owed / 100) : null, [mark("amount"), apart]),
+      row("Sections", submitted ? cited(picked) : none(),
+        key ? (wanted.length ? wanted.flatMap((s, i) => [i ? " " : null, submitted && !named(s) ? el("span", { class: "unnamed", title: "The proposal does not name this section.", text: "§" + s }) : "§" + s]) : "none") : null,
+        mark("sections")))),
+    !key ? el("p", { class: "note", text: "LangSmith did not send the answer key to this frame." }) : null,
+    key && !scores && submitted ? el("p", { class: "note", text: "The trial has no scores. The page compared the proposal with the answer key." }) : null,
+    scores && number(scores.proposals) > 1 ? el("p", { class: "note", text: `The agent submitted ${scores.proposals} proposals. The page shows the last proposal. The grader used the last proposal.` }) : null);
+
+  drawTiles();
+  drawJourneys();
+  drawBoard();
+  return [head, compared, strip,
+    error ? block("Error", el("p", { class: "text", text: `${error.exception_type || "error"}: ${String(error.exception_message || "").slice(0, 600)}` })) : null,
+    typeof inputs.instruction === "string" && inputs.instruction.trim() ? block("Customer message", el("blockquote", { text: inputs.instruction.trim() })) : null,
+    !empty(t.rationale) ? block("Proposal rationale", el("p", { class: "text", text: String(t.rationale) })) : null,
+    words(t.reply).trim() ? block("Reply to the customer", el("p", { class: "text", text: words(t.reply).trim() })) : null,
+    key && !empty(key.rationale) ? block("Answer key rationale", el("p", { class: "text", text: String(key.rationale) })) : null,
+    tiles, tree, board].filter(Boolean);
+}
+
+function keyView({ data: k, inputs, task }) {
+  return [
+    el("div", { class: "head" }, el("h1", { text: task || "answer key" }), el("span", { class: "tag", text: "answer key" })),
+    el("dl", { class: "pair" },
+      el("dt", { text: "Action" }), el("dd", { class: "code", text: empty(k.action) ? "none" : String(k.action) }),
+      el("dt", { text: "Amount" }), el("dd", { class: "code", text: dollars((number(k.amount_cents) || 0) / 100) }),
+      el("dt", { text: "Sections" }), el("dd", { class: "code", text: cited(sectionsOf(k.sections)) })),
+    !empty(k.rationale) ? block("Answer key rationale", el("p", { class: "text", text: String(k.rationale) })) : null,
+    typeof inputs.instruction === "string" && inputs.instruction.trim() ? block("Customer message", el("blockquote", { text: inputs.instruction.trim() })) : null,
+  ].filter(Boolean);
+}
+
+// Any other payload: its fields as sent.
+function fields(value) {
+  if (empty(value)) return el("p", { class: "sub", text: "The message contains no data." });
+  if (typeof value === "string") return el("p", { class: "text", text: value });
+  if (!isObject(value)) return el("pre", { class: "json", text: JSON.stringify(value, null, 2) });
+  return el("dl", { class: "pair" }, Object.entries(value).map(([k, v]) => [el("dt", { text: k }),
+    el("dd", {}, typeof v === "string" ? el("span", { class: "text", text: v }) : v === null || typeof v !== "object" ? el("span", { class: "code", text: String(v) })
+      : el("pre", { class: "json", text: JSON.stringify(v, null, 2) }))]));
+}
+function plainView() {
+  const sent = [["Output", state.output], ["Reference output", state.reference]].filter(([, entry]) => entry);
+  const inputs = sent.map(([, entry]) => entry.inputs).find((i) => !empty(i));
+  return [...sent.map(([title, entry]) => block(title, fields(entry.data))), inputs ? block("Inputs", fields(inputs)) : null].filter(Boolean);
+}
+
+// ---- measures: tokens from the outputs; seconds, calls and cost from this trial's row in the result tables
+function drawTiles() {
+  const trial = trialEntry();
+  if (!trial) return tiles.replaceChildren();
+  const t = trial.data, mine = rowOf(t) || {}, tokens = isObject(t.tokens) ? t.tokens : {};
+  const input = number(tokens.input), cached = number(tokens.cache), output = number(tokens.output);
+  const seconds = number(mine.agent_seconds), models = number(mine.model_calls), tools = number(mine.tool_calls), cost = number(mine.cost_usd);
+  const tile = (name, value, extra) => value === null ? null : el("div", {}, el("dt", { text: name }), el("dd", {}, value, extra ? el("small", { text: " " + extra }) : null));
+  const shown = [
+    tile("Agent time", seconds === null ? null : seconds.toFixed(1), "seconds"), tile("Model calls", models === null ? null : count(models)),
+    tile("Tool calls", tools === null ? null : count(tools)), tile("Cost", cost === null ? null : "$" + cost.toFixed(4)),
+    tile("Input tokens", input === null ? null : count(input), input && cached !== null ? `${Math.round(100 * cached / input)}% from the cache` : null),
+    tile("Output tokens", output === null ? null : count(output))].filter(Boolean);
+  const borrowed = [seconds !== null && "the agent time", (models !== null || tools !== null) && "the calls", cost !== null && "the cost"].filter(Boolean);
+  const listed = borrowed.length > 1 ? `${borrowed.slice(0, -1).join(", ")} and ${borrowed.at(-1)} come` : `${borrowed[0]} comes`;
+  tiles.replaceChildren(...(shown.length ? [el("h2", { text: "Measurements" }), el("dl", { class: "tiles" }, shown),
+    borrowed.length ? el("p", { class: "note", text: `${listed[0].toUpperCase()}${listed.slice(1)} from the result tables.` }) : null].filter(Boolean) : []));
+}
+
+// ---- tool-call journeys, from the file named in the address: this trial's steps, and the trials of its experiment
+// merged while their steps are the same
+function drawJourneys() {
+  const trial = trialEntry(), address = params.get("journeys");
+  strip.replaceChildren();
+  tree.replaceChildren();
+  if (!trial) return;
+  const none = (why) => tree.replaceChildren(el("p", { class: "note", text: `${why} The page shows the trial only.` }));
+  if (!address) return none("The page address gives no journeys file.");
+  const file = fetched(address, async () => {
+    const held = await get(address, "json");
+    if (!isObject(held) || !isObject(held.trials)) throw new Error("the file contains no trials");
+    return { trials: held.trials };
+  });
+  if (file.loading) return;
+  if (file.missing) return none(`The page did not read the journeys file ${address} (${file.missing}).`);
+  const name = trialName(trial), mine = name && isObject(file.trials[name]) && Array.isArray(file.trials[name].steps) ? file.trials[name] : null;
+  if (!mine) return none(`The journeys file ${address} does not contain ${name ? "the trial " + name : "this trial"}.`);
+
+  const label = (step) => (Array.isArray(step) ? step : [step]).map(String).join(" · ");
+  const path = mine.steps.map(label);
+  strip.replaceChildren(el("h2", { text: `Steps of this trial: ${path.length}` }),
+    path.length ? el("ol", { class: "steps" }, path.map((step, i) => el("li", {}, el("i", { text: String(i + 1) }), step))) : el("p", { class: "note", text: "The model made no tool call." }));
+
+  const node = (name) => ({ name, kids: new Map(), trials: 0, right: 0, stopped: 0 });
+  const root = node("");
+  for (const t of Object.values(file.trials)) {
+    if (!isObject(t) || !Array.isArray(t.steps) || t.graph !== mine.graph || t.model !== mine.model || t.effort !== mine.effort) continue;
+    let at = root;
+    for (const step of [null, ...t.steps]) {
+      if (step !== null) at = at.kids.get(label(step)) || at.kids.set(label(step), node(label(step))).get(label(step));
+      at.trials++;
+      at.right += t.right === true;
+    }
+    at.stopped++;
+  }
+  // One step: its number, its calls, a bar as long as its share of the experiment's trials, split into those that
+  // ended right and those that did not, and the same two numbers.
+  const line = (kid, depth, mineEnds) => [el("i", { text: String(depth) }), el("span", { class: "what", text: kid.name }),
+    el("span", { class: "share", style: `width:${Math.max(4, Math.round(64 * kid.trials / root.trials))}px` },
+      kid.right ? el("b", { style: `flex:${kid.right}` }) : null, kid.trials - kid.right ? el("b", { class: "wrong", style: `flex:${kid.trials - kid.right}` }) : null),
+    el("span", { class: "sub", text: `${kid.trials} ${kid.trials === 1 ? "trial" : "trials"}, ${kid.right} right` + (kid.stopped && kid.kids.size ? `, ${kid.stopped} end here` : "") }),
+    mineEnds ? el("span", { class: "tag", text: "this trial" }) : null];
+  // The steps after one: lines down the page while every trial takes the same step, then one branch per next step,
+  // the largest first. Where there are more than nine, the branches past the eighth, this trial's apart, are folded
+  // into one line. A branch off this trial's path is drawn when it is opened.
+  function after(from, depth, left) {
+    const list = el("ol", { class: "tree" });
+    let at = from;
+    while (at.kids.size === 1) {
+      const [kid] = at.kids.values(), on = Boolean(left) && left[0] === kid.name;
+      list.append(el("li", { class: on ? "on" : null }, el("div", { class: "line" }, line(kid, depth, on && left.length === 1))));
+      left = on ? left.slice(1) : null;
+      at = kid;
+      depth++;
+    }
+    const fork = (kid) => {
+      const on = Boolean(left) && left[0] === kid.name, item = el("li", { class: on ? "fork on" : "fork" });
+      if (!kid.kids.size) return build(item, {}, [el("div", { class: "line" }, line(kid, depth, on && left.length === 1))]);
+      const branch = el("details", { open: on }, el("summary", {}, line(kid, depth, on && left.length === 1)));
+      const fill = () => { if (branch.children.length === 1) branch.append(after(kid, depth + 1, on ? left.slice(1) : null)); };
+      if (on) fill(); else branch.addEventListener("toggle", fill);
+      return build(item, {}, [branch]);
+    };
+    const kids = [...at.kids.values()].sort((a, b) => b.trials - a.trials || (a.name < b.name ? -1 : 1));
+    const first = kids.length > 9 ? kids.filter((kid, i) => i < 8 || (left && left[0] === kid.name)) : kids, rest = kids.filter((kid) => !first.includes(kid));
+    list.append(...first.map(fork));
+    if (rest.length) {
+      const more = el("details", {}, el("summary", {}, el("span", { class: "sub", text: `${rest.length} more next steps, ${rest.reduce((n, kid) => n + kid.trials, 0)} trials` })));
+      more.addEventListener("toggle", () => { if (more.children.length === 1) more.append(el("ol", { class: "tree" }, rest.map(fork))); });
+      list.append(el("li", { class: "fork" }, more));
+    }
+    return list;
+  }
+  const experiment = [mine.graph, mine.model, mine.effort].filter((part) => typeof part === "string" && part);
+  tree.replaceChildren(el("h2", { text: "Steps of the experiment" }),
+    el("p", { class: "meta", text: [...experiment, `${root.trials} ${root.trials === 1 ? "trial" : "trials"}, ${root.right} right`].join(" · ") }),
+    after(root, 1, path),
+    el("p", { class: "note", text: "A step is one model message. A step contains the tool calls of that message. A line shows one step. Trials with the same steps share a line. "
+      + "Each line gives the number of trials and the number of right trials. The green part of the bar shows the right trials. The red part shows the wrong trials. "
+      + "The bold lines show the steps of this trial. Select a line with a plus sign to show the next steps."
+      + (root.stopped ? ` ${root.stopped} ${root.stopped === 1 ? "trial" : "trials"} made no tool call.` : "") + ` The data comes from the journeys file ${address}.` }));
+}
+
+// ---- the result tables: the same case in every experiment, and every experiment's share right against its cost
+function drawBoard() {
+  const trial = trialEntry(), folder = trial && folderOf(trial.data);
+  if (!folder) return board.replaceChildren();
+  const tables = fetched(folder, async () => {
+    const [cases, results] = await Promise.all(["cases.csv", "results.csv"].map((name) => get(folder + name, "text")));
+    return { cases: rows(cases), results: rows(results) };
+  });
+  if (tables.loading) return board.replaceChildren();
+  if (tables.missing) return board.replaceChildren(el("p", { class: "note", text: `The page did not read the result tables in ${folder} (${tables.missing}). The page does not show the experiment charts.` }));
+  const mine = tables.cases.find((r) => r.trial === trial.data.trial_name);
+  const here = (r) => Boolean(mine) && r.graph === mine.graph && r.model === mine.model && r.effort === mine.effort;
+  board.replaceChildren(el("h2", { text: "All experiments" }),
+    el("p", { class: "note", text: `The data comes from the result tables in ${folder}.` + (mine ? "" : " The result tables do not contain this trial.") }),
+    ...[caseGrid(tables, trial.task, here), ...costChart(tables.results, here)].filter(Boolean));
+}
+
+function caseGrid(tables, task, here) {
+  const of = tables.cases.filter((r) => r.case === task);
+  if (!of.length) return null;
+  const distinct = (values) => [...new Set(values)];
+  const graphs = distinct(tables.results.map((r) => r.graph));
+  // Agents down the side where there are several. A sweep of one agent has its models down the side.
+  const side = graphs.length > 1 ? (r) => r.graph : (r) => r.model, top = graphs.length > 1 ? (r) => `${r.model} · ${r.effort}` : (r) => r.effort;
+  const columns = distinct(tables.results.map(top));
+  const body = distinct(tables.results.map(side)).map((name) => el("tr", {}, el("th", { scope: "row", class: "code", text: name }), columns.map((column) => {
+    const experiment = tables.results.find((r) => side(r) === name && top(r) === column);
+    const trials = experiment ? of.filter((r) => r.graph === experiment.graph && r.model === experiment.model && r.effort === experiment.effort) : [];
+    if (!trials.length) return el("td", { class: "num sub", text: "–" });
+    const right = trials.filter((r) => r.right === "True").length;
+    return el("td", { class: "num" }, el("span", { class: `cell ${right === trials.length ? "all" : right ? "some" : "none"}${here(experiment) ? " here" : ""}`,
+      title: `${experiment.graph} · ${experiment.model} · ${experiment.effort}: ${right} of ${trials.length} trials are right.`, text: `${right}/${trials.length}` }));
+  })));
+  return el("section", {}, el("h2", { text: "This case in each experiment" }),
+    el("div", { class: "scroll" }, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}), columns.map((c) => el("th", { scope: "col", class: "num code", text: c })))), el("tbody", {}, body))),
+    el("p", { class: "note", text: "Each cell gives the number of right trials and the number of trials for this case. The cell with the border is the experiment of this trial." }));
+}
+
+const SHAPES = [
+  (x, y, r) => `M${x - r},${y}a${r},${r} 0 1,0 ${2 * r},0a${r},${r} 0 1,0 ${-2 * r},0Z`,
+  (x, y, r) => `M${x - r * 0.88},${y - r * 0.88}h${r * 1.76}v${r * 1.76}h${-r * 1.76}Z`,
+  (x, y, r) => `M${x},${y - r * 1.25}L${x + r * 1.25},${y}L${x},${y + r * 1.25}L${x - r * 1.25},${y}Z`,
+  (x, y, r) => `M${x},${y - r * 1.2}L${x + r * 1.15},${y + r * 0.85}L${x - r * 1.15},${y + r * 0.85}Z`,
+  (x, y, r) => `M${x},${y + r * 1.2}L${x + r * 1.15},${y - r * 0.85}L${x - r * 1.15},${y - r * 0.85}Z`,
+];
+const price = (v) => v >= 0.1 ? "$" + v.toFixed(2) : v >= 0.001 ? "$" + v.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") : "$" + v.toFixed(4);
+
+// Share right against cost per case, one mark per experiment that has every case, as in evals/pareto.py. This run's
+// experiment is the mark in the accent color with its name beside it; the table under the chart holds every value.
+function costChart(results, here) {
+  const all = results.map((r) => ({ ...r, x: number(r.cost_per_case_usd), y: number(r.reward), sd: number(r.reward_sd), mine: here(r), name: `${r.graph} · ${r.model} · ${r.effort}` }));
+  const shown = all.filter((r) => r.complete === "True" && r.x > 0 && r.y !== null);
+  const graphs = [...new Set(all.map((r) => r.graph))];
+  const table = el("details", {}, el("summary", { text: `Table of the ${all.length} experiments` }), el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, ["Agent", "Model", "Effort"].map((h) => el("th", { scope: "col", text: h })), ["Right trials", "Cost for each case", "Trials"].map((h) => el("th", { scope: "col", class: "num", text: h })))),
+    el("tbody", {}, all.map((r) => el("tr", { class: r.mine ? "here" : null }, el("td", { class: "code", text: r.graph }), el("td", { class: "code", text: r.model }), el("td", { class: "code", text: r.effort }),
+      el("td", { class: "num", text: r.y === null ? "" : `${r.y.toFixed(1)}%${r.sd === null ? "" : ` ±${r.sd.toFixed(1)}`}` }), el("td", { class: "num", text: r.x === null ? "" : "$" + r.x.toFixed(4) }),
+      el("td", { class: "num", text: r.trials + (r.complete === "True" ? "" : " (not complete)") })))))));
+  const title = el("h2", { text: "Right trials and cost of each experiment" });
+  if (!shown.length) return [el("section", {}, title, el("p", { class: "note", text: "No experiment has all cases. The page shows the table only." }), table)];
+
+  const W = 460, H = 222, left = 34, right = 12, top = 24, bottom = 30;
+  const lo = Math.min(...shown.map((r) => r.x)) * 0.7, hi = Math.max(...shown.map((r) => r.x)) * 1.45;
+  const floor = Math.max(0, Math.floor((Math.min(...shown.map((r) => r.y - (r.sd || 0))) - 2) / 10) * 10), ceiling = floor >= 100 ? 110 : 100;
+  const X = (v) => left + Math.log(v / lo) / Math.log(hi / lo) * (W - left - right), Y = (v) => top + (1 - (v - floor) / (ceiling - floor)) * (H - top - bottom);
+  let ticks = [];
+  for (let power = Math.floor(Math.log10(lo)); power <= Math.ceil(Math.log10(hi)); power++) for (const m of [1, 2, 5]) if (m * 10 ** power >= lo && m * 10 ** power <= hi) ticks.push({ m, v: m * 10 ** power });
+  if (ticks.length > 6) ticks = ticks.filter((tick) => tick.m === 1);
+  const levels = [];
+  for (let v = floor; v <= ceiling; v += ceiling - floor > 50 ? 20 : 10) levels.push(v);
+  const point = (r) => svg("g", { class: r.mine ? "mine" : null },
+    r.sd ? svg("line", { class: "spread", x1: X(r.x), x2: X(r.x), y1: Y(Math.min(ceiling, r.y + r.sd)), y2: Y(Math.max(floor, r.y - r.sd)) }) : null,
+    svg("path", { class: "mark", d: SHAPES[graphs.indexOf(r.graph) % SHAPES.length](X(r.x), Y(r.y), r.mine ? 5.5 : 4) }));
+  const marks = shown.filter((r) => !r.mine).concat(shown.filter((r) => r.mine)).map((r) => ({ r, node: point(r) }));
+  const mine = shown.find((r) => r.mine);
+  const drawing = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `The chart shows the right trials and the cost of ${shown.length} experiments. The table gives the values.` },
+    levels.map((v) => [svg("line", { class: "grid", x1: left, x2: W - right, y1: Y(v), y2: Y(v) }), svg("text", { x: left - 6, y: Y(v) + 3.5, "text-anchor": "end", text: String(v) })]),
+    svg("text", { x: 0, y: 8, text: "right trials (%)" }),
+    ticks.map((tick) => svg("text", { x: X(tick.v), y: H - bottom + 13, "text-anchor": "middle", text: price(tick.v) })),
+    svg("text", { x: (left + W - right) / 2, y: H - 3, "text-anchor": "middle", text: "cost for each case in US dollars (logarithmic scale)" }),
+    marks.map((m) => m.node),
+    mine ? svg("text", { class: "name", x: X(mine.x) + (X(mine.x) > W * 0.55 ? -9 : 9), y: Y(mine.y) + (Y(mine.y) < top + 14 ? 14 : -8), "text-anchor": X(mine.x) > W * 0.55 ? "end" : "start", text: mine.name }) : null);
+  const tip = el("div", { class: "tip", hidden: true });
+  const chart = el("div", { class: "chart" }, drawing, tip);
+  // The mark nearest the pointer answers, so a small mark does not have to be hit.
+  drawing.addEventListener("pointermove", (event) => {
+    const box = drawing.getBoundingClientRect(), scale = box.width / W;
+    const at = { x: (event.clientX - box.left) / scale, y: (event.clientY - box.top) / scale };
+    const far = (m) => Math.hypot(X(m.r.x) - at.x, Y(m.r.y) - at.y);
+    const near = marks.reduce((a, b) => far(a) <= far(b) ? a : b);
+    for (const m of marks) m.node.classList.toggle("near", m === near && far(near) < 40);
+    tip.hidden = far(near) >= 40;
+    if (tip.hidden) return;
+    tip.replaceChildren(el("b", { text: `${near.r.y.toFixed(1)}% right${near.r.sd === null ? "" : ` (±${near.r.sd.toFixed(1)})`} · $${near.r.x.toFixed(4)} for each case` }), near.r.name);
+    tip.style.left = Math.max(125, Math.min(box.width - 125, X(near.r.x) * scale)) + "px";
+    tip.style.top = Math.max(34, Y(near.r.y) * scale) + "px";
+  });
+  drawing.addEventListener("pointerleave", () => { tip.hidden = true; for (const m of marks) m.node.classList.remove("near"); });
+  const sample = (i, mineToo) => svg("svg", { viewBox: "0 0 12 12", class: mineToo ? "mine" : null }, svg("path", { class: "mark", d: SHAPES[i % SHAPES.length](6, 6, 4) }));
+  const legend = el("p", { class: "key" }, graphs.length > 1 ? graphs.map((g, i) => shown.some((r) => r.graph === g && !r.mine) ? el("span", {}, sample(i), g) : null) : null,
+    mine ? el("span", {}, sample(graphs.indexOf(mine.graph), true), "the experiment of this trial") : null);
+  const unshown = all.length - shown.length;
+  return [el("section", {}, title, chart, legend,
+    el("p", { class: "note", text: "Each mark is one experiment that has all cases." + (shown.some((r) => r.sd) ? " A vertical line gives the standard deviation for one pass through all cases." : "")
+      + (unshown ? ` The table also shows ${unshown === 1 ? "1 experiment that does" : `${unshown} experiments that do`} not have all cases.` : "") }), table)];
+}
+</script>
+</body>
+</html>

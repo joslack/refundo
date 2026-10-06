@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Renderer test page</title>
+<!--
+A page that loads evals/langsmith_render.html in frames and posts it payloads the way LangSmith's custom output
+rendering does: a frame sandboxed to scripts and its own origin, sent {type, data, metadata: {inputs}} when it has
+loaded and five more times over the next three seconds. evals/langsmith_render_harness.py fills in __DATA__ with
+real payloads from the job folders. Opened as it is, from evals/, the page has the payloads written below and nothing
+from a trial.
+-->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: the controls in rows above the frames they set up; under the frames, the messages as they are sent. */
+:root {
+  --bg: #f4f6f8; --surface: #ffffff; --ink: #16202b; --muted: #5b6978; --line: #d7dde4; --accent: #0b6e69;
+  --part: #8f5a00; --part-bg: #fbeed3;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f141a; --surface: #171e26; --ink: #e6eaef; --muted: #98a5b3; --line: #2a3440; --accent: #58c4bc;
+    --part: #e8b75a; --part-bg: #392d12;
+    color-scheme: dark;
+  }
+}
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.5; }
+.page { max-width: 1360px; margin: 0 auto; padding: 24px 20px 56px; display: flex; flex-direction: column; gap: 22px; }
+header, section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+h1 { font-size: 22px; font-weight: 600; margin: 0; }
+h2 { font-size: 15px; font-weight: 600; margin: 0; }
+p { margin: 0; }
+.facts { color: var(--muted); font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.legend { color: var(--muted); font-size: 12.5px; max-width: 100ch; }
+.banner { background: var(--part-bg); color: var(--part); border: 1px solid var(--part); border-radius: 4px; padding: 8px 12px; max-width: 100ch; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.controls label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.label { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+select { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; max-width: 440px; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--surface); }
+.seg button { all: unset; cursor: pointer; padding: 5px 11px; font: inherit; font-size: 13px; color: var(--muted); border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.seg button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+#stage { flex-direction: row; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+figure { margin: 0; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+figure.alone { flex-basis: 100%; order: -1; }
+figcaption { font-family: var(--mono); font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.pane { resize: both; overflow: hidden; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); max-width: 100%; }
+iframe { display: block; width: 100%; height: 100%; border: 0; }
+pre { margin: 0; font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
+#log { margin: 0; padding-left: 0; list-style: none; font-family: var(--mono); font-size: 12px; color: var(--muted); max-height: 180px; overflow: auto; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>Renderer test page</h1>
+    <p class="facts" id="facts"></p>
+    <p class="banner" id="banner" hidden>You opened this page from a file. The frames cannot read the journeys file or the result tables. A frame cannot send the answer key to another frame. Use an HTTP server to open this page.</p>
+    <p class="legend">Each frame contains the renderer page. The test page sends the messages that LangSmith sends. In the trial pane, one frame gets the trial outputs. A second frame gets the answer key. Each message contains the trial inputs. In the comparison pane, one frame gets the answer key. Each other frame gets the outputs of one trial. Each message contains the example inputs. The test page sends each message 0, 100, 300, 700, 1500 and 3100 milliseconds after the frame loads. Drag the corner of a frame to change the frame size.</p>
+  </header>
+
+  <section>
+    <div class="controls">
+      <label><span class="label">Payload</span><select id="sample"></select></label>
+      <label><span class="label">Trial</span><select id="run"></select></label>
+      <span><span class="label">Pane </span><span class="seg" id="pane"></span></span>
+    </div>
+    <div class="controls" id="options"></div>
+    <p class="legend" id="about"></p>
+  </section>
+
+  <section id="stage"></section>
+
+  <section>
+    <h2>Sent messages</h2>
+    <p class="legend">Each line gives the time in milliseconds after the test page made the frames.</p>
+    <ol id="log"></ol>
+  </section>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const $ = (id) => document.getElementById(id);
+const el = (tag, attrs = {}, ...kids) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "text") node.textContent = v; else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) node.append(kid);
+  return node;
+};
+let D;
+try { D = JSON.parse($("data").textContent); } catch (e) { D = { samples: [], renderer: "langsmith_render.html" }; }
+
+// Payloads no trial produced, written here: shapes the renderer has to cope with.
+const trial = (more) => ({ action: null, reply: null, task_name: "refundo/sample-01", trial_name: "sample-01__test", agent_output: null,
+  agent_metadata: { langgraph_graph: "sql" }, rewards: { reward: 0, action: 0, amount: 0, sections: 0, proposals: 0 }, exception: null,
+  tokens: { input: 18240, cache: 15104, output: 612 }, cost_usd: null, ...more });
+const asked = { task_name: "sample-01", instruction: "Sample request: I paid two times this month. Can I get one payment back?\n" };
+const key = { action: "cash_refund", amount_cents: 2400, sections: ["4.2", "10"], rationale: "Sample rationale: the second payment is a duplicate of the first payment." };
+const run = (outputs) => ({ experiment: "sample experiment", trial: "sample-01__test", inputs: { ...asked, task_name: "refundo/sample-01", trial_name: "sample-01__test", agent: "langgraph", model: "provider/sample-model" }, outputs });
+const WRITTEN = [
+  { name: "Sample: trial with no proposal", example: { inputs: asked, outputs: key }, runs: [run(trial({ reply: "Sample reply: I did not find your account." }))] },
+  { name: "Sample: trial with an error and no scores", example: { inputs: asked, outputs: key },
+    runs: [run(trial({ rewards: null, tokens: { input: null, cache: null, output: null }, exception: { exception_type: "AgentTimeoutError", exception_message: "Agent execution timed out after 600.0 seconds" } }))] },
+  { name: "Sample: trial with a proposal and no scores", example: { inputs: asked, outputs: key },
+    runs: [run(trial({ action: "account_credit", amount_cents: 1200, sections: ["4", "10"], rationale: "Sample rationale.", reply: "Sample reply.", rewards: null }))] },
+  { name: "Sample: trial with missing fields", example: { inputs: asked, outputs: { action: "deny" } },
+    runs: [{ experiment: "sample experiment", inputs: {}, outputs: { trial_name: 7, rewards: { reward: "1" }, sections: "[\"5\", \"9\"]", amount_cents: "1200", reply: [{ type: "text", text: "Sample reply in blocks." }], tokens: "many" } }] },
+  { name: "Sample: output of another project", example: { inputs: { question: "15 * 3" }, outputs: { answer: "45" } },
+    runs: [{ experiment: "another project", inputs: { question: "15 * 3" }, outputs: { output: { content: "45", type: "ai", tool_calls: [], response_metadata: { finish_reason: "stop" } } } }] },
+  { name: "Sample: empty output", example: { inputs: { question: "15 * 3" }, outputs: { answer: "45" } }, runs: [{ experiment: "another project", inputs: { question: "15 * 3" }, outputs: {} }] },
+  { name: "Sample: text output and no answer key", example: null, runs: [{ experiment: "another project", inputs: {}, outputs: "The answer is 45." }] },
+  { name: "Sample: other messages only", raw: [{ source: "some-extension", payload: 1 }, "ping", null, { type: "resize", height: 400 }] },
+];
+const samples = [...(D.samples || []), ...WRITTEN];
+
+const state = { sample: 0, run: 0, pane: "run", resend: true, referenceFirst: false, emptyInputs: false, referenceAsOutput: false, files: true, text: false, width: 480, height: 450, theme: "" };
+const PANES = [["run", "trial pane"], ["compare", "comparison pane"], ["both", "one frame, two messages"]];
+const CHECKS = [["resend", "Send each message six times"], ["files", "Give the data files to the renderer"], ["referenceFirst", "Send the answer key first"],
+  ["emptyInputs", "Send empty inputs"], ["referenceAsOutput", "Send the answer key as type output"], ["text", "Show the frame text"]];
+let timers = [], started = 0;
+
+$("facts").textContent = [D.written ? `Payload time: ${D.written}` : "This page has no trial payloads. Run evals/langsmith_render_harness.py to make a page with trial payloads.",
+  `Renderer: ${D.renderer}`, D.journeys ? `Journeys file: ${D.journeys} (sample data)` : "Journeys file: none",
+  `Result tables: ${D.results || "the default folder of the renderer"}`].join(" · ");
+$("banner").hidden = location.protocol !== "file:";
+
+function address() {
+  const query = new URLSearchParams();
+  if (state.files && D.journeys) query.set("journeys", D.journeys);
+  if (state.files && D.results) query.set("results", D.results);
+  if (!state.files) query.set("results", "none");  // a folder that does not exist, so the renderer finds no tables
+  if (state.theme) query.set("theme", state.theme);
+  return D.renderer + (String(query) ? "?" + query : "");
+}
+// The chosen trial, then a trial of each of two other experiments, a wrong one where there is one.
+function beside(sample, chosen) {
+  const others = [...new Set(sample.runs.map((r) => r.experiment))].filter((name) => name !== chosen.experiment).slice(0, 2);
+  return [chosen, ...others.map((name) => sample.runs.find((r) => r.experiment === name && r.right === false) || sample.runs.find((r) => r.experiment === name))];
+}
+function stage() {
+  timers.forEach(clearTimeout);
+  timers = [];
+  started = performance.now();
+  $("log").replaceChildren();
+  const sample = samples[state.sample], chosen = (sample.runs || [])[state.run] || (sample.runs || [])[0];
+  const inputs = (given) => state.emptyInputs ? {} : given || {};
+  const output = (r, given) => ({ type: "output", data: r.outputs, metadata: { inputs: inputs(given) } });
+  const reference = () => sample.example ? [{ type: state.referenceAsOutput ? "output" : "reference", data: sample.example.outputs, metadata: { inputs: inputs(sample.example.inputs) } }] : [];
+  let frames;
+  if (sample.raw) frames = [{ title: "Frame with other messages", messages: sample.raw }];
+  else if (state.pane === "run") {  // a frame for the trial's output and one for its example's reference outputs, both sent the trial's inputs
+    const answer = reference().map((message) => ({ title: "Answer key", height: 285, messages: [{ ...message, metadata: { inputs: inputs(chosen.inputs) } }] }));
+    const own = { title: `Trial output · ${chosen.experiment}`, messages: [output(chosen, chosen.inputs)] };
+    frames = state.referenceFirst ? [...answer, own] : [own, ...answer];
+  }
+  else if (state.pane === "both") frames = [{ title: `Trial output and answer key · ${chosen.experiment}`, messages: state.referenceFirst ? [...reference(), output(chosen, chosen.inputs)] : [output(chosen, chosen.inputs), ...reference()] }];
+  else {
+    const answer = reference().map((message) => ({ title: "Answer key", alone: true, height: 285, messages: [message] }));
+    const trials = beside(sample, chosen).map((r) => ({ title: `Trial output · ${r.experiment}`, messages: [output(r, sample.example && sample.example.inputs)] }));
+    frames = state.referenceFirst ? [...answer, ...trials] : [...trials, ...answer];  // the frame made first hears first
+  }
+  $("stage").replaceChildren(...frames.map((frame) => {
+    // As LangSmith makes it: scripts and its own origin, and nothing else a sandbox can allow.
+    const page = el("iframe", { src: address(), title: frame.title, sandbox: "allow-scripts allow-same-origin" });
+    const origin = new URL(address(), location.href).origin;
+    let sent = 0;
+    const send = () => {
+      for (const message of frame.messages) {
+        page.contentWindow.postMessage(message, origin === "null" ? "*" : origin);
+        $("log").prepend(el("li", { text: `${Math.round(performance.now() - started)} · ${frame.title} · ${message && message.type ? "type " + message.type : "other message"}` }));
+      }
+      if (state.resend && ++sent < 6) timers.push(setTimeout(send, 100 * 2 ** (sent - 1)));
+    };
+    page.addEventListener("load", send, { once: true });
+    // What the frame shows, as text, once every message has been sent. A frame of another origin cannot be read.
+    const shown = state.text ? el("pre", { style: `max-width:${state.width}px` }) : null;
+    const read = () => { try { shown.textContent = page.contentDocument.body.innerText; } catch (e) { shown.textContent = "The test page cannot read this frame."; } };
+    if (shown) page.addEventListener("load", () => timers.push(setTimeout(read, 3500)), { once: true });
+    return el("figure", { class: frame.alone ? "alone" : null }, el("figcaption", { text: frame.title }),
+      el("div", { class: "pane", style: `width:${state.width}px;height:${frame.height || state.height}px` }, page), shown);
+  }));
+}
+function controls() {
+  const sample = samples[state.sample];
+  $("sample").replaceChildren(...samples.map((s, i) => el("option", { value: i, selected: i === state.sample,
+    text: s.commit ? `${s.name} · commit ${s.commit} · ${s.runs.filter((r) => !r.right).length} wrong trials of ${s.runs.length}` : s.name })));
+  $("run").replaceChildren(...(sample.runs || []).map((r, i) => el("option", { value: i, selected: i === state.run,
+    text: [r.experiment, r.trial, r.right === undefined ? null : r.right ? "right" : "wrong"].filter(Boolean).join(" · ") })));
+  $("run").disabled = !sample.runs || sample.runs.length < 2;
+  $("pane").replaceChildren(...PANES.map(([value, name]) => el("button", { "aria-pressed": String(state.pane === value), text: name, onclick: () => { state.pane = value; controls(); stage(); } })));
+  $("about").textContent = sample.about || "";
+}
+$("sample").addEventListener("change", (event) => { state.sample = Number(event.target.value); state.run = 0; controls(); stage(); });
+$("run").addEventListener("change", (event) => { state.run = Number(event.target.value); stage(); });
+const pick = (name, values) => el("label", {}, el("span", { class: "label", text: name }), el("select", { onchange: (event) => { state[name.toLowerCase()] = /^\d+$/.test(event.target.value) ? Number(event.target.value) : event.target.value; stage(); } },
+  values.map(([value, text]) => el("option", { value, selected: state[name.toLowerCase()] === value, text }))));
+// A page address such as ...#compare,1,2,dark,535x450,text opens on the comparison pane with payload 1 and trial 2,
+// in the dark theme, with frames of that size and their text under them.
+const [pane, sampleAt, runAt, ...flags] = location.hash.slice(1).split(",");
+if (PANES.some(([value]) => value === pane)) state.pane = pane;
+if (sampleAt && samples[Number(sampleAt)]) state.sample = Number(sampleAt);
+if (runAt && Number(runAt) >= 0) state.run = Number(runAt);
+for (const flag of flags) {
+  const size = /^(\d+)x(\d+)$/.exec(flag);
+  if (size) [state.width, state.height] = [Number(size[1]), Number(size[2])];
+  else if (flag === "dark" || flag === "light") state.theme = flag;
+  else if (flag in state && typeof state[flag] === "boolean") state[flag] = !state[flag];
+}
+$("options").replaceChildren(
+  ...CHECKS.map(([name, text]) => el("label", {}, el("input", { type: "checkbox", checked: state[name], onchange: (event) => { state[name] = event.target.checked; stage(); } }), text)),
+  pick("Width", [[380, "380"], [480, "480 (trial pane)"], [535, "535 (comparison pane)"], [850, "850 (annotation queue)"]].concat([380, 480, 535, 850].includes(state.width) ? [] : [[state.width, String(state.width)]])),
+  pick("Height", [[285, "285"], [450, "450"], [600, "600 (default of LangSmith)"]].concat([285, 450, 600].includes(state.height) ? [] : [[state.height, String(state.height)]])),
+  pick("Theme", [["", "system"], ["light", "light"], ["dark", "dark"]]));
+controls();
+stage();
+</script>
+</body>
+</html>
