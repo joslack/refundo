@@ -1,0 +1,430 @@
+<title>Refundo Tool Journeys</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: an audit sheet in one column, as in the explore page. The experiments table first, then the controls
+   that choose one experiment, then its tree, its heatmap and the trials behind a chosen branch or cell. The
+   tables and the tree scroll sideways inside their own frame. */
+:root {
+  --bg: #f4f6f8; --surface: #ffffff; --ink: #16202b; --muted: #5b6978; --line: #d7dde4; --accent: #0b6e69;
+  --good: #1c7449; --good-bg: #e2f2e9; --part: #8f5a00; --part-bg: #fbeed3; --bad: #b0271f; --bad-bg: #fbe3e1;
+  --heat: #3fa39c;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141a; --surface: #171e26; --ink: #e6eaef; --muted: #98a5b3; --line: #2a3440; --accent: #58c4bc;
+    --good: #72d19b; --good-bg: #16321f; --part: #e8b75a; --part-bg: #392d12; --bad: #f39088; --bad-bg: #3c1a18;
+    --heat: #1a726c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141a; --surface: #171e26; --ink: #e6eaef; --muted: #98a5b3; --line: #2a3440; --accent: #58c4bc;
+  --good: #72d19b; --good-bg: #16321f; --part: #e8b75a; --part-bg: #392d12; --bad: #f39088; --bad-bg: #3c1a18;
+  --heat: #1a726c;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.5; }
+.page { max-width: 1360px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; display: flex; flex-direction: column; gap: 36px; }
+h1 { font-size: 24px; font-weight: 600; margin: 0; text-wrap: balance; }
+h2 { font-size: 17px; font-weight: 600; margin: 0; text-wrap: balance; }
+p { margin: 0; }
+a { color: var(--accent); }
+section, header { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.facts { color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
+.banner { background: var(--part-bg); color: var(--part); border: 1px solid var(--part); border-radius: 4px; padding: 8px 12px; max-width: 80ch; }
+.legend { color: var(--muted); font-size: 12.5px; max-width: 95ch; }
+.scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 9px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
+th { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); background: var(--surface); white-space: normal; vertical-align: bottom; line-height: 1.3; }
+.seg button:focus-visible, tr.pick:focus-visible, summary:focus-visible, a:focus-visible, .node:focus-visible, .hc:focus-visible, .more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+td.num, th.num { text-align: right; }
+td.num { font-family: var(--mono); font-size: 12.5px; }
+.code { font-family: var(--mono); font-size: 12.5px; }
+.sub { color: var(--muted); }
+.failed { color: var(--bad); }
+tr.group td { border-top: 2px solid var(--line); }
+tr.partial td { color: var(--muted); }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--surface); }
+.seg button { all: unset; cursor: pointer; padding: 5px 11px; font: inherit; font-size: 13px; color: var(--muted); border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.label { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-right: 6px; }
+tr.pick { cursor: pointer; }
+tr.pick:hover td, tr.pick[aria-selected="true"] td { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.tag { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; }
+.trial { border: 1px solid var(--line); border-radius: 4px; background: var(--surface); min-width: 0; }
+.trial > summary { cursor: pointer; padding: 8px 12px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; list-style: none; }
+.trial > summary::-webkit-details-marker { display: none; }
+.trial > summary::before { content: "+"; font-family: var(--mono); color: var(--muted); width: 10px; }
+.trial[open] > summary::before { content: "\2212"; }
+.trial .body { padding: 4px 12px 14px 34px; display: flex; flex-direction: column; gap: 10px; }
+.chip { font-size: 12px; padding: 1px 7px; border-radius: 3px; }
+.chip.ok { background: var(--good-bg); color: var(--good); }
+.chip.no { background: var(--bad-bg); color: var(--bad); }
+.meta { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+
+/* The share of trials as a tint, from the surface to --heat. Every tint leaves the ink readable on it. */
+.hs, .hc { all: unset; box-sizing: border-box; display: block; min-width: 30px; padding: 3px 4px; border-radius: 3px; font-family: var(--mono); font-size: 12px; text-align: center; color: var(--ink); }
+.hc { cursor: pointer; }
+.hc:hover, .hc[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--ink); }
+td.share, td.heat { padding: 2px; text-align: center; }
+th.turn { padding: 7px 2px; text-align: center; }
+th.turn span { display: inline-block; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; text-transform: none; letter-spacing: 0; font-family: var(--mono); font-weight: 400; color: var(--ink); }
+th.over { text-align: center; border-left: 1px solid var(--line); }
+#heat { width: auto; }
+#heat th.step { text-align: center; padding: 6px 2px; min-width: 30px; }
+#heat th.row { position: sticky; left: 0; z-index: 1; white-space: nowrap; vertical-align: middle; padding: 2px 14px 2px 9px; border-bottom: 0; }
+#heat tbody tr:not(.band) th.row { text-transform: none; letter-spacing: 0; font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--ink); }
+#heat td { border-bottom: 0; }
+#heat tr.band th.row { padding-top: 12px; }
+#heat tr.count td { color: var(--muted); font-family: var(--mono); font-size: 12px; text-align: center; padding: 4px 2px; border-bottom: 1px solid var(--line); }
+#heat tr.count th.row { color: var(--muted); font-family: var(--sans); border-bottom: 1px solid var(--line); }
+#heat td.any, #heat th.any { border-left: 1px solid var(--line); padding-left: 6px; }
+
+/* The tree: a branch is a box and, to its right, the branches that follow it. A box is as tall as what follows,
+   and its words stay in view while the frame scrolls past it. */
+.frame { max-height: min(80vh, 780px); overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; }
+.steps, .tree { display: flex; width: max-content; padding-inline: 10px; }
+.steps { position: sticky; top: 0; z-index: 1; gap: 4px; padding-block: 8px 6px; min-width: 100%; box-sizing: border-box; background: var(--surface); border-bottom: 1px solid var(--line); }
+.steps span { flex: none; width: 232px; font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.tree { flex-direction: column; gap: 4px; padding-block: 8px 10px; }
+.branch { display: flex; gap: 4px; align-items: stretch; }
+.kids { display: flex; flex-direction: column; gap: 4px; }
+.node { box-sizing: border-box; flex: none; width: 232px; cursor: pointer; display: flex; flex-direction: column; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
+.node .in { position: sticky; top: 40px; display: flex; flex-direction: column; gap: 5px; }
+.node:hover { border-color: var(--accent); }
+.node[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.node .call { display: block; font-family: var(--mono); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+.node.rest .call { font-family: var(--sans); font-size: 12.5px; color: var(--muted); }
+.more { all: unset; cursor: pointer; align-self: start; padding: 5px 11px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); color: var(--accent); font-size: 13px; }
+.split { display: flex; gap: 2px; height: 5px; }
+.split i { display: block; min-width: 2px; border-radius: 3px; }
+.split .ok { background: var(--good); }
+.split .no { background: var(--bad); }
+
+#trials-list { display: flex; flex-direction: column; gap: 8px; }
+.steps-list { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 8px; }
+.steps-list li { min-width: 0; }
+.steps-list li::marker { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.callrow { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 2px 16px; padding-block: 2px; }
+.callrow > * { min-width: 0; overflow-wrap: anywhere; }
+.sql { font-family: var(--mono); font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+#tip { position: fixed; z-index: 10; left: 0; top: 0; max-width: min(340px, calc(100vw - 24px)); padding: 6px 9px; border-radius: 4px; background: var(--ink); color: var(--bg); font-size: 12.5px; line-height: 1.4; white-space: pre-line; pointer-events: none; }
+@media (max-width: 560px) {
+  .callrow { grid-template-columns: 1fr; }
+  .trial .body { padding-left: 12px; }
+}
+@media (prefers-reduced-motion: no-preference) { tr.pick td, .node { transition: background-color 80ms, border-color 80ms; } }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Tool journeys of the refund agents</h1>
+    <p class="facts" id="facts"></p>
+    <p class="banner" id="banner" hidden></p>
+  </header>
+
+  <section>
+    <h2>Experiments</h2>
+    <div class="scroll"><table id="summary"></table></div>
+    <p class="legend">Each row is one experiment: one agent with one model and one effort. A step is the set of tool calls that the model made in one message. If the code of the agent made a tool call, that tool call is one step. The Steps column shows the median number of steps in a trial. The Tool calls column and the Failed tool calls column show the mean number in a trial. Each table column shows the percentage of trials that read the table one time or more. If a <span class="code">run_sql</span> query named a table and did not fail, the trial read the table. If a trial called a tool that reads a table, the trial also read the table. The schema column counts <span class="code">list_tables</span> and each <span class="code">run_sql</span> query of <span class="code">information_schema</span> or <span class="code">pg_catalog</span>. Select a row to see that experiment below.</p>
+  </section>
+
+  <section id="choice">
+    <h2 id="choice-title"></h2>
+    <div class="controls">
+      <div><span class="label">Agent</span><span class="seg" id="graphs"></span></div>
+      <div><span class="label">Model</span><span class="seg" id="models"></span></div>
+      <div id="efforts-box"><span class="label">Effort</span><span class="seg" id="efforts"></span></div>
+      <div><span class="label">Trials</span><span class="seg" id="show"></span></div>
+    </div>
+  </section>
+
+  <section id="tree-section">
+    <h2>Journey tree</h2>
+    <div class="controls">
+      <div id="sql-box"><span class="label">Name run_sql by</span><span class="seg" id="sql"></span></div>
+      <div><span class="label">Minimum trials for a branch</span><span class="seg" id="min"></span></div>
+    </div>
+    <p class="legend" id="tree-count"></p>
+    <div class="frame"><div class="steps" id="tree-steps"></div><div class="tree" id="tree"></div></div>
+    <p class="legend">Read the tree from left to right. Each box is one branch. A branch is the sequence of steps from step 1 to the step in the box. The boxes on the right of a branch show the next steps. The branch with the most trials is first. A step is the set of tool calls that the model made in one message. The tree ignores the sequence of the tool calls in one message. The tree counts a repeated tool call one time. The length of the bar shows the number of trials on the branch. The green part shows the right trials. The red part shows the wrong trials. A branch with more trials has a taller box. If trials stop at a branch, the branch shows their number. The name of a <span class="code">run_sql</span> tool call gives the tables that its query reads. If a name ends with a question mark, the database has no table with that name. If a tool call failed, its name ends with <span class="code">(failed)</span>. If the code of the agent made a tool call, its name ends with <span class="code">by code</span>. Select a branch to see its trials.</p>
+  </section>
+
+  <section id="heat-section">
+    <h2>Step heatmap</h2>
+    <p class="legend" id="heat-count"></p>
+    <div class="scroll"><table id="heat"></table></div>
+    <p class="legend" id="heat-legend"></p>
+  </section>
+
+  <section id="trials">
+    <h2>Trials</h2>
+    <p id="trials-title"></p>
+    <p class="legend" id="trials-count"></p>
+    <div id="trials-list"></div>
+  </section>
+</div>
+<div id="tip" role="tooltip" hidden></div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const D = JSON.parse(document.getElementById("data").textContent);
+const $ = (id) => document.getElementById(id);
+const el = (tag, attrs = {}, ...kids) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") node.className = v; else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v); else node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat(Infinity)) if (kid !== null && kid !== undefined && kid !== false) node.append(kid);
+  return node;
+};
+const keep = (key, value) => { try { localStorage.setItem("journeys-" + key, value); } catch (e) {} };
+const kept = (key) => { try { return localStorage.getItem("journeys-" + key); } catch (e) { return null; } };
+const share = (n, of) => (of ? 100 * n / of : 0);
+const percent = (n, of) => { const p = share(n, of); return p > 0 && p < 0.5 ? "<1" : String(Math.round(p)); };
+const tint = (n, of) => `background:color-mix(in srgb, var(--heat) ${Math.round(share(n, of))}%, var(--surface))`;
+const plural = (n, one, many = one + "s") => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
+const series = (words) => (words.length > 1 ? `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}` : words.join(""));
+
+// ---- what each trial did. A call is a label's position, or [label, query] for run_sql.
+const labelOf = (call) => D.labels[Array.isArray(call) ? call[0] : call];
+const SCHEMA = D.tables.length;  // the row after the tables: a look at the schema
+const tableName = (i) => (i === SCHEMA ? "schema" : D.tables[i]);
+for (const e of D.experiments) {
+  // For each trial and step, what the step did: "t:" a tool called, "r:" a table read, "f" a failed call.
+  e.did = e.trials.map((t) => t[3].map((step) => {
+    const keys = new Set();
+    for (const call of step) {
+      const L = labelOf(call);
+      keys.add("t:" + L.tool);
+      for (const table of L.reads) keys.add("r:" + table);
+      if (L.schema) keys.add("r:" + SCHEMA);
+      if (L.failed) keys.add("f");
+    }
+    return keys;
+  }));
+  const n = e.trials.length, steps = e.trials.map((t) => t[3].length).sort((a, b) => a - b), calls = e.trials.flatMap((t) => t[3].flat());
+  e.n = n;
+  e.right = e.trials.filter((t) => t[1]).length;
+  e.steps = n ? (steps[Math.floor((n - 1) / 2)] + steps[Math.ceil((n - 1) / 2)]) / 2 : 0;
+  e.calls = n ? calls.length / n : 0;
+  e.failed = n ? calls.filter((c) => labelOf(c).failed).length / n : 0;
+  e.read = Array.from({ length: SCHEMA + 1 }, (_, table) => e.did.filter((steps) => steps.some((keys) => keys.has("r:" + table))).length);
+  e.sql = calls.some(Array.isArray);
+}
+const shownTables = D.tables.map((_, i) => i).filter((i) => D.tables[i] !== "proposals" || D.experiments.some((e) => e.read[i]));
+
+// ---- header
+const expected = D.cases_count * D.repeats, partial = D.experiments.filter((e) => !e.complete);
+$("facts").textContent = [`commit ${D.commit}`, plural(D.cases_count, "case"), `${plural(D.repeats, "trial")} for each case`, plural(D.experiments.length, "experiment"),
+  plural(D.experiments.reduce((n, e) => n + e.n, 0), "trial"), D.absent.length ? `no trials for ${D.absent.join(", ")}` : null, `data read ${D.generated}`].filter(Boolean).join(" · ");
+if (partial.length) { $("banner").hidden = false; $("banner").textContent = `${partial.length} of ${plural(D.experiments.length, "experiment")} ${partial.length === 1 ? "is" : "are"} not complete. The Trials column shows the number of trials in the data. These numbers will change.`; }
+
+// ---- the chosen experiment
+const state = { graph: kept("graph"), model: kept("model"), effort: kept("effort"), show: kept("show") || "all", sql: kept("sql") || "query", min: Number(kept("min")) || 2 };
+let chosen = null;  // the branch or cell whose trials are listed: { title, trials, from }
+function current() {
+  let list = D.experiments.filter((e) => e.graph === state.graph);
+  if (!list.length) { state.graph = D.experiments[0].graph; list = D.experiments.filter((e) => e.graph === state.graph); }
+  if (!list.some((e) => e.model === state.model)) state.model = list[0].model;
+  list = list.filter((e) => e.model === state.model);
+  if (!list.some((e) => e.effort === state.effort)) state.effort = list[0].effort;
+  return list.find((e) => e.effort === state.effort);
+}
+const shown = (trial) => state.show === "all" || (state.show === "right") === Boolean(trial[1]);
+const picked = (e) => e.trials.map((_, i) => i).filter((i) => shown(e.trials[i]));
+function set(changes) {
+  Object.assign(state, changes);
+  for (const [key, value] of Object.entries(changes)) keep(key, value);
+  chosen = null;
+  draw();
+}
+function seg(id, choices, key) {
+  $(id).replaceChildren(...choices.map(([value, name]) => el("button", { "aria-pressed": String(state[key] === value), text: name, onclick: () => set({ [key]: value }) })));
+}
+function drawControls() {
+  const e = current(), sameGraph = D.experiments.filter((x) => x.graph === e.graph), sameModel = sameGraph.filter((x) => x.model === e.model);
+  $("choice-title").textContent = `${e.graph} · ${D.model_names[e.model]} ${e.effort}`;
+  seg("graphs", D.graphs.map((g) => [g, g]), "graph");
+  seg("models", D.models.filter((m) => sameGraph.some((x) => x.model === m)).map((m) => [m, D.model_names[m]]), "model");
+  seg("efforts", D.efforts.filter((f) => sameModel.some((x) => x.effort === f)).map((f) => [f, f]), "effort");
+  $("efforts-box").hidden = sameModel.length < 2;
+  seg("show", [["all", `all (${e.n})`], ["right", `right (${e.right})`], ["wrong", `wrong (${e.n - e.right})`]], "show");
+  seg("sql", [["query", "tables"], ["tool", "tool name"]], "sql");
+  $("sql-box").hidden = !e.sql;
+  seg("min", [1, 2, 3, 5].map((k) => [k, String(k)]), "min");
+}
+
+// ---- experiments table
+function drawSummary() {
+  const e0 = current();
+  const head = [
+    el("tr", {}, el("th", { colspan: "7" }), el("th", { class: "over", colspan: String(shownTables.length + 1), text: "Percentage of trials that read the table" })),
+    el("tr", {}, ["Agent", "Model"].map((name) => el("th", { text: name })), ["Trials", "Right", "Steps", "Tool calls", "Failed tool calls"].map((name) => el("th", { class: "num", text: name })),
+      [...shownTables, SCHEMA].map((i) => el("th", { class: "turn" }, el("span", { text: tableName(i) })))),
+  ];
+  const body = D.experiments.map((e, i) => {
+    const pick = () => { set({ graph: e.graph, model: e.model, effort: e.effort }); $("choice").scrollIntoView({ block: "start", behavior: "smooth" }); };
+    return el("tr", { class: ["pick", i > 0 && D.experiments[i - 1].graph !== e.graph ? "group" : "", e.complete ? "" : "partial"].join(" ").trim(), tabindex: "0", role: "button", "aria-selected": String(e === e0),
+      onclick: pick, onkeydown: (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); pick(); } } },
+      el("td", { class: "code", text: e.graph }), el("td", {}, D.model_names[e.model], el("span", { class: "sub", text: " " + e.effort })),
+      el("td", { class: "num", text: e.complete ? String(e.n) : `${e.n} of ${expected}` }), el("td", { class: "num", text: share(e.right, e.n).toFixed(1) + "%" }),
+      el("td", { class: "num", text: String(e.steps) }), el("td", { class: "num", text: e.calls.toFixed(1) }), el("td", { class: "num", text: e.failed.toFixed(1) }),
+      [...shownTables, SCHEMA].map((t) => el("td", { class: "share" }, el("span", { class: "hs", style: tint(e.read[t], e.n), text: percent(e.read[t], e.n),
+        "data-tip": `${e.read[t]} of ${plural(e.n, "trial")} read ${t === SCHEMA ? "the schema" : "the table " + tableName(t)}.` }))));
+  });
+  $("summary").replaceChildren(el("thead", {}, head), el("tbody", {}, body));
+}
+
+// ---- how a call and a step are written
+function named(id) {
+  const L = D.labels[id], failed = L.t.endsWith(" (failed)"), text = failed ? L.t.slice(0, -9) : L.t, cut = text.startsWith(L.tool + ": ") ? L.tool.length + 2 : 0;
+  return [cut ? el("span", { class: "sub", text: text.slice(0, cut) }) : null, text.slice(cut), failed ? el("span", { class: "failed", text: " (failed)" }) : null,
+    L.code ? el("span", { class: "sub", text: " by code" }) : null];
+}
+const written = (path) => path.map((step) => step.map((id) => D.labels[id].t).join(" & ")).join(" → ");
+function choose(target, what) {
+  for (const old of document.querySelectorAll('.node[aria-pressed="true"], .hc[aria-pressed="true"]')) old.setAttribute("aria-pressed", "false");
+  target.setAttribute("aria-pressed", "true");
+  chosen = what;
+  drawTrials();
+  $("trials").scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+// ---- the tree. A node is [step, trials, right, trials that end here, next].
+const count = (node) => (state.show === "all" ? node[1] : state.show === "right" ? node[2] : node[1] - node[2]);
+const under = (node, into = []) => { into.push(...node[3]); for (const next of node[4]) under(next, into); return into; };
+function drawTree() {
+  const e = current(), root = e.trees[e.sql ? state.sql : "query"], total = count(root);
+  const unit = Math.min(12, Math.max(1.5, 440 / Math.max(total, 1)));  // pixels of height per trial
+  let depth = 0, journeys = 0;
+  const tally = (node) => { if (node[3].some((i) => shown(e.trials[i]))) journeys++; node[4].forEach(tally); };
+  tally(root);
+  const box = (lines, n, right, extra, what, rest) => el("div", { class: rest ? "node rest" : "node", role: "button", tabindex: "0", "aria-pressed": "false",
+    onclick: (ev) => choose(ev.currentTarget, what), onkeydown: (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); choose(ev.currentTarget, what); } } },
+    el("span", { class: "in" }, lines.map((line) => el("span", { class: "call" }, line)),
+      el("span", { class: "split" }, right ? el("i", { class: "ok", style: `width:${share(right, total)}%` }) : null, n - right ? el("i", { class: "no", style: `width:${share(n - right, total)}%` }) : null),
+      el("span", { class: "meta", text: plural(n, "trial") + (state.show === "all" ? ` · ${right} right` : "") + extra })));
+  const rightOf = (n, node) => (state.show === "all" ? node[2] : state.show === "right" ? n : 0);
+  const trialsOf = (nodes) => nodes.flatMap((node) => under(node)).filter((i) => shown(e.trials[i]));
+  function follow(node, path) {
+    const next = node[4].filter((k) => count(k) > 0), big = next.filter((k) => count(k) >= state.min), small = next.filter((k) => count(k) < state.min);
+    const out = big.map((k) => branch(k, [...path, k[0]]));
+    if (small.length) {
+      const n = small.reduce((sum, k) => sum + count(k), 0), right = small.reduce((sum, k) => sum + rightOf(count(k), k), 0);
+      depth = Math.max(depth, path.length + 1);
+      const others = plural(small.length, "other branch", "other branches");
+      out.push(el("div", { class: "branch", style: `min-height:${Math.round(n * unit)}px` }, box([others], n, right, "",
+        { from: "tree-section", title: `Trials on the ${others} ${path.length ? "after the branch: " + written(path) : "at step 1"}`, trials: trialsOf(small) }, true)));
+    }
+    return out;
+  }
+  function branch(node, path) {
+    const n = count(node), next = follow(node, path), stop = n - node[4].reduce((sum, k) => sum + count(k), 0);
+    depth = Math.max(depth, path.length);
+    return el("div", { class: "branch", style: `min-height:${Math.round(n * unit)}px` },
+      box(node[0].map(named), n, rightOf(n, node), next.length && stop ? ` · ${stop} stop here` : "",
+        { from: "tree-section", title: `Trials on the branch: ${written(path)}`, trials: trialsOf([node]) }),
+      next.length ? el("div", { class: "kids" }, next) : null);
+  }
+  const top = follow(root, []), none = root[3].filter((i) => shown(e.trials[i]));
+  if (none.length) {
+    depth = Math.max(depth, 1);
+    top.push(el("div", { class: "branch" }, box(["no tool call"], none.length, none.filter((i) => e.trials[i][1]).length, "", { from: "tree-section", title: "Trials with no tool call", trials: none }, true)));
+  }
+  $("tree").replaceChildren(...top);
+  $("tree-steps").replaceChildren(...Array.from({ length: depth }, (_, i) => el("span", { text: `Step ${i + 1}` })));
+  $("tree-count").textContent = total ? `The ${plural(total, "trial")} made ${plural(journeys, "different journey")}. A journey is the sequence of steps in one trial.`
+    + (state.min > 1 ? ` The tree puts each branch with fewer than ${state.min} trials into a box with the name "other branches".` : "") : "The selection has no trials.";
+}
+
+// ---- the heatmap
+function drawHeat() {
+  const e = current(), list = picked(e), N = list.length, depth = Math.max(0, ...list.map((i) => e.did[i].length));
+  const at = (key, s) => list.filter((i) => (s === null ? e.did[i].some((keys) => keys.has(key)) : e.did[i][s] && e.did[i][s].has(key)));
+  const used = (key) => e.did.some((steps) => steps.some((keys) => keys.has(key)));
+  const bands = [
+    ["Tool calls", D.tools.filter((t) => used("t:" + t)).map((t) => ["t:" + t, t, `called ${t}`])],
+    ["Tables", [...shownTables, SCHEMA].map((i) => ["r:" + i, tableName(i), i === SCHEMA ? "read the schema" : `read ${D.tables[i]}`])],
+    ["Failed tool calls", [["f", "failed tool call", "had a failed tool call"]]],
+  ];
+  const cell = (key, did, s) => {
+    const trials = at(key, s), n = trials.length, where = s === null ? "at one step or more" : `at step ${s + 1}`;
+    if (!n) return el("td", { class: s === null ? "heat any" : "heat" });
+    const right = trials.filter((i) => e.trials[i][1]).length;
+    return el("td", { class: s === null ? "heat any" : "heat" }, el("button", { class: "hc", style: tint(n, N), "aria-pressed": "false", text: percent(n, N),
+      "data-tip": `${n} of ${plural(N, "trial")} ${did} ${where}.` + (state.show === "all" ? `\n${right} of these trials ${right === 1 ? "is" : "are"} right.` : ""),
+      onclick: (ev) => choose(ev.currentTarget, { from: "heat-section", title: `Trials that ${did} ${where}`, trials }) }));
+  };
+  const steps = Array.from({ length: depth }, (_, s) => s);
+  const head = el("tr", {}, el("th", { class: "row", text: "Step" }), steps.map((s) => el("th", { class: "step", text: String(s + 1) })), el("th", { class: "step any", text: "Any step" }));
+  const body = [el("tr", { class: "count" }, el("th", { class: "row", text: "trials with a tool call" }), steps.map((s) => el("td", { text: String(list.filter((i) => e.did[i].length > s).length) })),
+    el("td", { class: "any", text: String(list.filter((i) => e.did[i].length).length) }))];
+  for (const [band, rows] of bands) {
+    body.push(el("tr", { class: "band" }, el("th", { class: "row", text: band }), el("td", { colspan: String(depth + 1) })));
+    for (const [key, name, did] of rows) body.push(el("tr", {}, el("th", { class: "row", text: name }), steps.map((s) => cell(key, did, s)), cell(key, did, null)));
+  }
+  $("heat").replaceChildren(el("thead", {}, head), el("tbody", {}, body));
+  $("heat-count").textContent = N ? `Each cell shows the percentage of the ${plural(N, "trial")} that did this at the step.` : "The selection has no trials.";
+  const tools = D.tools.filter((t) => used("t:" + t) && D.covered[t] && D.covered[t].length);
+  $("heat-legend").textContent = ["The columns show the steps in sequence.", "The Any step column shows the percentage of trials that did this at one step or more.",
+    e.sql ? "If a run_sql query named a table and did not fail, the trial read the table." : null, `If a trial called a tool that reads a table, the trial ${e.sql ? "also " : ""}read the table.`,
+    ...tools.map((t) => `${t} reads ${series(D.covered[t].map((name) => (name === "schema" ? "the schema" : name)))}.`), "A failed tool call reads no table.", "Select a cell to see its trials."].filter(Boolean).join(" ");
+}
+
+// ---- the trials behind a branch or a cell
+function trialBlock(e, i) {
+  const [c, right, error, steps, folder] = e.trials[i], k = D.cases[c] || { id: c.toUpperCase() }, calls = steps.flat(), failed = calls.filter((x) => labelOf(x).failed).length;
+  const block = el("details", { class: "trial" }, el("summary", {}, el("span", { class: "chip " + (right ? "ok" : "no"), text: right ? "right" : "wrong" }), el("span", { class: "code", text: k.id }),
+    k.area ? el("span", { class: "tag", text: k.area }) : null,
+    el("span", { class: "meta", text: [plural(steps.length, "step"), plural(calls.length, "tool call"), failed ? `${failed} failed` : null, error || null].filter(Boolean).join(" · ") })));
+  block.addEventListener("toggle", () => {
+    if (!block.open || block.children.length > 1) return;
+    block.append(el("div", { class: "body" }, el("p", { class: "sub" }, k.intent ? k.intent + " " : null, el("span", { class: "meta", text: `trial ${folder}` })),
+      steps.length ? el("ol", { class: "steps-list" }, steps.map((step) => el("li", {}, step.map((call) => el("div", { class: "callrow" }, el("span", { class: "code" }, named(Array.isArray(call) ? call[0] : call)),
+        Array.isArray(call) && call[1] >= 0 ? el("span", { class: "sql", text: D.queries[call[1]] }) : null)))))
+        : el("p", { class: "sub", text: "This trial made no tool call." })));
+  });
+  return block;
+}
+const FIRST = 60;  // trials the list shows before it is asked for the rest
+function drawTrials(every = false) {
+  const e = current(), list = (chosen ? chosen.trials : picked(e)).slice().sort((a, b) => e.trials[a][1] - e.trials[b][1] || e.trials[a][0].localeCompare(e.trials[b][0]) || a - b);
+  const right = list.filter((i) => e.trials[i][1]).length, cases = new Set(list.map((i) => e.trials[i][0])).size;
+  $("trials-title").replaceChildren(...(chosen ? [chosen.title + ". ", el("a", { href: "#" + chosen.from, text: chosen.from === "tree-section" ? "Go back to the tree." : "Go back to the heatmap." })]
+    : [`This list shows ${state.show === "all" ? "all" : "the " + state.show} trials of the experiment. Select a branch in the tree or a cell in the heatmap to see only its trials.`]));
+  $("trials-count").textContent = [`${plural(list.length, "trial")} from ${plural(cases, "case")}: ${right} right and ${list.length - right} wrong.`, right && list.length - right ? "The wrong trials are first." : null,
+    chosen && chosen.from === "tree-section" ? "An arrow (→) separates two steps. The & sign joins the tool calls of one step." : null, "Open a trial to see its tool calls in sequence.", "Each number is one step.",
+    e.sql ? "The list shows the query of each run_sql tool call." : null, e.sql && D.sql_cut ? `The page shows only the first ${D.sql_cut} characters of each query.` : null].filter(Boolean).join(" ");
+  const rest = every ? 0 : Math.max(0, list.length - FIRST);
+  $("trials-list").replaceChildren(...list.slice(0, list.length - rest).map((i) => trialBlock(e, i)),
+    ...(rest ? [el("button", { class: "more", text: `Show the other ${plural(rest, "trial")}`, onclick: () => drawTrials(true) })] : []));
+}
+
+// ---- one tooltip for every cell that carries data-tip, on hover and on keyboard focus
+const tip = $("tip");
+function showTip(target) {
+  tip.textContent = target.getAttribute("data-tip");
+  tip.hidden = false;
+  const box = target.getBoundingClientRect(), mine = tip.getBoundingClientRect();
+  const left = Math.min(Math.max(8, box.left + box.width / 2 - mine.width / 2), window.innerWidth - mine.width - 8);
+  tip.style.transform = `translate(${Math.round(left)}px, ${Math.round(box.top - mine.height - 6 < 4 ? box.bottom + 6 : box.top - mine.height - 6)}px)`;
+}
+const hideTip = () => { tip.hidden = true; };
+const tipTarget = (ev) => (ev.target instanceof Element ? ev.target.closest("[data-tip]") : null);
+document.addEventListener("pointerover", (ev) => { const target = tipTarget(ev); if (target) showTip(target); else hideTip(); });
+document.addEventListener("focusin", (ev) => { const target = tipTarget(ev); if (target) showTip(target); else hideTip(); });
+document.addEventListener("focusout", hideTip);
+document.addEventListener("scroll", hideTip, true);
+
+function draw() { drawControls(); drawSummary(); drawTree(); drawHeat(); drawTrials(); }
+if (D.experiments.length) draw(); else $("facts").textContent += " · no experiments for this commit";
+</script>
