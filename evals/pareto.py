@@ -8,6 +8,7 @@ each job's name) and writes, to evals/results/<commit>/:
     cases.csv        one row per trial: what was proposed, how it scored, calls, seconds, tokens, cost
     misses.csv       one row per case and experiment with a wrong trial: what was expected, what was given, and
                      which models missed the same case with the same agent
+    not_run.csv      one row per trial that was not run, and why
     pareto.png       reward against cost per case, one line per agent and model across its reasoning efforts
     pareto-top.png   the same, zoomed on the experiments that are cheap and at least 80% right
     index.png        reward against the Artificial Analysis Intelligence Index for the same model and effort
@@ -19,14 +20,23 @@ were right every time, some of the time, and never. Cost per case is the experim
 list price, divided by the number of trials. The charts show experiments that have every case, the same number of
 times.
 
+A trial that a rate limit, an overloaded provider, an account out of credits or a stopped job kept from running
+is not a result (evals/limits.py says how that is told). It is in no score, no cost and no time; results.csv
+counts such trials per experiment, not_run.csv lists them, and `evals/run.py resume` runs them again. An
+experiment that lacks trials for that reason is not complete and is not charted.
+
 Seconds per case is the median time the agent took, from its first model call to its reply, as Harbor timed it.
-It compares experiments that ran under the same load, and is left blank for a job whose model calls were paced,
-because the waits are in it. If evals/latency.py has written latency.csv beside the tables, its estimate of the
-seconds a case spent in model calls is added to results.csv.
+It is taken over the trials with nothing else inside that time: no model call that the client sent again and
+no request of LangSmith's client refused. results.csv says how many trials that left and how many had each,
+and gives the median of the trials left out beside it. It compares experiments that ran under the same load,
+and is left blank for a job whose model calls were paced, because the waits are in every trial. A call sent
+again shows only where the model's client writes it down: always for the Fireworks models, and for OpenAI's
+only in jobs started with its request log on; retries_logged says which, and where it is False a retried call
+cannot be told from a slow one. If evals/latency.py has written latency.csv beside the tables, its estimate of
+the seconds a case spent in model calls is added to results.csv.
 """
 
 import csv
-import json
 import re
 import sys
 from collections import Counter
@@ -43,7 +53,10 @@ from matplotlib.ticker import FuncFormatter  # noqa: E402
 from matplotlib.transforms import Bbox  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path[:0] = [str(ROOT), str(ROOT / "evals")]
+import limits  # noqa: E402
+from limits import read_json  # noqa: E402
+
 from world.labeling import LABELS, load_labels, ui_action  # noqa: E402
 from world.oracle import label  # noqa: E402
 from world.scenarios import ALL  # noqa: E402
@@ -93,25 +106,19 @@ COLORS = {"gpt-6-luna": "#111111", "gpt-5.6-luna": "#6b6b6b", "gpt-5.4-mini": "#
           "gpt-oss-120b": "#a23b72"}
 
 
-def read_json(path: Path, default=None):
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return default
-
-
-# A trial that ended this way says nothing about the agent: the provider refused the call because the account was
-# out of credits, the grader was cut off, or the job was stopped. The case counts as not run.
-NOT_A_RESULT = {"ApiUsageLimitError", "VerifierTimeoutError", "CancelledError"}
-
-
-def trials_of(job: Path, model: str) -> list[dict]:
-    """One row per trial in a job folder that produced a result."""
+def trials_of(job: Path, model: str) -> tuple[list[dict], list[dict]]:
+    """One row per trial in a job folder that produced a result, and one per trial that was not run."""
     price_in, price_read, price_write, price_out = PRICES[model]
-    rows = []
+    rows, missing = [], []
     for path in sorted(job.glob("*/result.json")):
         trial = read_json(path)
-        if not trial or (trial.get("exception_info") or {}).get("exception_type") in NOT_A_RESULT:
+        if not trial:
+            continue
+        state = limits.standing(path.parent, trial)
+        if state["not_run"]:
+            # The provider's own words stay in the trial's folder: they can name the account.
+            missing.append({"case": trial["task_name"].split("/")[-1], "trial": trial["trial_name"], "error": state["error"],
+                            "reason": state["not_run"]})
             continue
         scores = (trial.get("verifier_result") or {}).get("rewards") or {}
         used = trial.get("agent_result") or {}
@@ -134,11 +141,14 @@ def trials_of(job: Path, model: str) -> list[dict]:
             "tool_calls": sum(m.get("type") == "tool" for m in messages),
             "agent_seconds": round((datetime.fromisoformat(ran["finished_at"])
                                     - datetime.fromisoformat(ran["started_at"])).total_seconds(), 1) if timed else "",
+            # What else was inside those seconds. A trial with either is a result whose time is not used.
+            "retried_calls": state["retried_calls"], "trace_refused": bool(state["trace_refused"]),
+            "clean": limits.clean(state), "request_log": state["request_log"],
             "input_tokens": tokens_in, "cached_tokens": read, "cache_write_tokens": write, "output_tokens": out,
             "cost_usd": ((tokens_in - read - write) * price_in + read * price_read + write * price_write
                          + out * price_out) / 1e6,
         })
-    return rows
+    return rows, missing
 
 
 def experiments(commit: str) -> list[dict]:
@@ -150,7 +160,7 @@ def experiments(commit: str) -> list[dict]:
         if not named or named["model"] not in PRICES:
             continue
         graph, model, effort = named["graph"], named["model"], named["effort"]
-        trials = trials_of(job, model)
+        trials, missing = trials_of(job, model)
         if not trials:
             continue
 
@@ -164,9 +174,11 @@ def experiments(commit: str) -> list[dict]:
         times = {len(v) for v in by_case.values()}
         rates = [sum(v) / len(v) for v in by_case.values()]
         repeated = times != {1}
-        settings = ((read_json(job / "config.json") or {}).get("agents") or [{}])[0].get("kwargs") or {}
-        paced = bool((settings.get("configurable") or {}).get("calls_per_minute"))
-        seconds = [t["agent_seconds"] for t in trials if t["agent_seconds"] != ""]
+        agent = ((read_json(job / "config.json") or {}).get("agents") or [{}])[0]
+        paced = bool(((agent.get("kwargs") or {}).get("configurable") or {}).get("calls_per_minute"))
+        seconds = [t["agent_seconds"] for t in trials if t["agent_seconds"] != "" and t["clean"]]
+        delayed = [t["agent_seconds"] for t in trials if t["agent_seconds"] != "" and not t["clean"]]
+        why_missing = Counter(t["reason"] for t in missing)
         row = {
             "graph": graph, "model": model, "effort": effort,
             "effective_effort": DEFAULT_EFFORT.get(model, "default") if effort == "default" else effort,
@@ -183,9 +195,20 @@ def experiments(commit: str) -> list[dict]:
             "action": share([t["action"] for t in trials]), "amount": share([t["amount"] for t in trials]),
             "sections": share([t["sections"] for t in trials]),
             "no_proposal": sum(t["proposal"] is None for t in trials), "errored": sum(t["errored"] for t in trials),
+            # A trial cut off at the time limit with no sign of the provider holding it up. It stays a result.
+            "timed_out": sum(t["error"] == "AgentTimeoutError" for t in trials),
+            "not_run": len(missing), "not_run_reasons": "; ".join(f"{n} {reason}" for reason, n in why_missing.most_common()),
             "model_calls_per_case": round(sum(t["model_calls"] for t in trials) / len(trials), 1),
             "tool_calls_per_case": round(sum(t["tool_calls"] for t in trials) / len(trials), 1),
             "agent_seconds_per_case": round(median(seconds), 1) if seconds and not paced else "",
+            "seconds_from_trials": len(seconds) if not paced else "",
+            "trials_with_calls_sent_again": sum(bool(t["retried_calls"]) for t in trials),
+            "trials_with_trace_refused": sum(t["trace_refused"] for t in trials),
+            "agent_seconds_per_case_left_out": round(median(delayed), 1) if delayed and not paced else "",
+            "paced": paced,
+            # langchain-fireworks writes a line for every call it sends again. OpenAI's client does only with its
+            # request log on, which leaves a line per request in the agent's log.
+            "retries_logged": agent.get("model_name", "").startswith("fireworks/") or any(t["request_log"] for t in trials),
             "input_tokens_per_case": round(sum(t["input_tokens"] for t in trials) / len(trials)),
             "cached_tokens_per_case": round(sum(t["cached_tokens"] for t in trials) / len(trials)),
             "output_tokens_per_case": round(sum(t["output_tokens"] for t in trials) / len(trials)),
@@ -193,7 +216,7 @@ def experiments(commit: str) -> list[dict]:
             "cache_write_tokens": sum(t["cache_write_tokens"] for t in trials),
             "output_tokens": sum(t["output_tokens"] for t in trials),
             "cost_per_case_usd": round(sum(t["cost_usd"] for t in trials) / len(trials), 6),
-            "job": job.name, "cases": trials,
+            "job": job.name, "cases": trials, "not_run_trials": missing,
         }
         # A graph, model and effort run more than once (a restarted or test job) counts once: the job with the most trials.
         key = (graph, model, effort)
@@ -435,7 +458,8 @@ def misses(rows: list[dict]) -> list[dict]:
 
 
 def write_csv(rows: list[dict], folder: Path) -> None:
-    """results.csv, cases.csv and misses.csv. latency.csv, where evals/latency.py has written it, adds a column."""
+    """results.csv, cases.csv, misses.csv and not_run.csv. latency.csv, where evals/latency.py has written it, adds
+    a column."""
     latency = {}
     if (folder / "latency.csv").exists():
         with (folder / "latency.csv").open() as f:
@@ -443,12 +467,19 @@ def write_csv(rows: list[dict], folder: Path) -> None:
     for r in rows:
         r["model_seconds_per_case_estimated"] = latency.get(r["job"], "")
     with (folder / "results.csv").open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=[k for k in rows[0] if k != "cases"], extrasaction="ignore")
+        writer = csv.DictWriter(f, fieldnames=[k for k in rows[0] if k not in ("cases", "not_run_trials")], extrasaction="ignore")
         writer.writeheader()
         writer.writerows(in_order(rows))
+    with (folder / "not_run.csv").open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["graph", "model", "effort", "case", "trial", "error", "reason", "job"],
+                                extrasaction="ignore")
+        writer.writeheader()
+        for r in in_order(rows):
+            writer.writerows(t | {"graph": r["graph"], "model": r["model"], "effort": r["effort"], "job": r["job"]}
+                             for t in sorted(r["not_run_trials"], key=lambda t: (t["case"], t["trial"])))
     columns = ["graph", "model", "effort", "case", "trial", "right", "action", "amount", "sections", "proposed_action",
-               "proposed_amount_cents", "error", "model_calls", "tool_calls", "agent_seconds", "input_tokens", "cached_tokens",
-               "cache_write_tokens", "output_tokens", "cost_usd"]
+               "proposed_amount_cents", "error", "model_calls", "tool_calls", "agent_seconds", "retried_calls", "trace_refused",
+               "input_tokens", "cached_tokens", "cache_write_tokens", "output_tokens", "cost_usd"]
     with (folder / "cases.csv").open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
@@ -482,5 +513,10 @@ if __name__ == "__main__":
         print(f"{r['graph']:11} {NAMES[r['model']]:24} {r['effort']:8} reward {r['reward']:5.1f}%{spread}"
               f"  cost/case ${r['cost_per_case_usd']:.4f}  tool calls {r['tool_calls_per_case']:4}  seconds {r['agent_seconds_per_case']:>5}"
               f"  trials {r['trials']:3}{'' if r['complete'] else ' (not every case)'}"
-              f"  no proposal {r['no_proposal']:2}  errored {r['errored']:2}")
+              f"  no proposal {r['no_proposal']:2}  errored {r['errored']:2}  not run {r['not_run']:2}"
+              f"  calls sent again {r['trials_with_calls_sent_again']:2}  trace refused {r['trials_with_trace_refused']:2}")
     print(f"{len(rows)} experiments; rank correlation with the Artificial Analysis index: {found}")
+    lacking = [r["job"] for r in rows if r["not_run"]]
+    if lacking:
+        print("Trials were not run in these jobs; this runs them again into the same experiments:\n"
+              "  uv run python evals/run.py resume " + " ".join(lacking))

@@ -7,10 +7,12 @@
 Reads the same job folders as evals/pareto.py and writes evals/jobs/explore-<commit>.html, one file with its data
 inside. The page has three parts:
 
-    Experiments              one row per agent and model: accuracy, seconds, tokens, cost and calls per case
+    Experiments              one row per agent and model: accuracy, seconds, tokens, cost and calls per case, and
+                             how many trials were not run, had a model call sent again or had their trace refused
     Cases with a wrong answer    which models missed a case with one agent, or which agents missed it at all
     One case                 what was expected, and for every trial what it proposed, its rationale, its reply to
-                             the customer and, for a wrong one, its tool calls in order
+                             the customer and, for a wrong one, its tool calls in order; trials that were not run
+                             are listed with the reason and are not among the wrong ones
 
 It reports what happened and draws no conclusion. --planned is the number of experiments the run was started
 with; while fewer are complete, the page says the run is still going. With LANGSMITH_API_KEY set, each experiment and trial links to
@@ -60,17 +62,6 @@ def conversation(folder: Path) -> dict:
     return {"reply": reply, "calls": chosen if chosen and len(chosen) == made else None}
 
 
-def retried(job: Path) -> int:
-    """How many of a job's trials had a model call that the client had to send again."""
-    count = 0
-    for log in job.glob("*__*/agent/langgraph-run.log"):
-        try:
-            count += "Retrying" in log.read_text(errors="replace")
-        except OSError:
-            pass
-    return count
-
-
 def links(commit: str) -> tuple[dict[str, str], dict[tuple[str, str], str]]:
     """Each experiment's page and each trial's trace in LangSmith, by job name and by job and trial. Empty when
     LangSmith cannot be reached."""
@@ -118,7 +109,12 @@ def data(commit: str, notes: list[str], planned: int | None = None) -> dict:
             "never": number(r["cases_never_right"]), "seconds": number(r["agent_seconds_per_case"]),
             "cost": r["cost_per_case_usd"], "input": r["input_tokens_per_case"], "cached": r["cached_tokens_per_case"],
             "output": r["output_tokens_per_case"], "model_calls": r["model_calls_per_case"],
-            "tool_calls": r["tool_calls_per_case"], "no_proposal": r["no_proposal"], "retried": retried(JOBS / r["job"]),
+            "tool_calls": r["tool_calls_per_case"], "no_proposal": r["no_proposal"],
+            # What a rate limit or an outage did: trials with no result, and results whose seconds are not used.
+            "not_run": r["not_run"], "not_run_reasons": r["not_run_reasons"], "retried": r["trials_with_calls_sent_again"],
+            "trace_refused": r["trials_with_trace_refused"], "seconds_trials": number(r["seconds_from_trials"]),
+            "seconds_left_out": number(r["agent_seconds_per_case_left_out"]), "paced": r["paced"],
+            "retries_logged": r["retries_logged"],
             "started": datetime.fromisoformat(started).astimezone().strftime("%H:%M") if started else "",
             "url": experiment_url.get(r["job"]),
         })
@@ -146,6 +142,7 @@ def data(commit: str, notes: list[str], planned: int | None = None) -> dict:
             entry = {
                 "c": t["case"], "g": r["graph"], "m": r["model"], "right": t["right"], "a": t["action"], "am": t["amount"],
                 "s": t["sections"], "secs": number(t["agent_seconds"]), "mc": t["model_calls"], "tc": t["tool_calls"],
+                "again": t["retried_calls"], "refused": t["trace_refused"],
                 "cost": round(t["cost_usd"], 6), "err": t["error"] or None, "url": trace_url.get((r["job"], t["trial"])),
                 "p": proposal and {"action": proposal.get("action"), "amount_cents": proposal.get("amount_cents"),
                                    "sections": json.loads(sections) if isinstance(sections, str) else sections},
@@ -158,13 +155,15 @@ def data(commit: str, notes: list[str], planned: int | None = None) -> dict:
                 if not t["right"]:
                     entry["calls"] = said["calls"]
             trials.append(entry)
+    not_run = [{"c": t["case"], "g": r["graph"], "m": r["model"], "why": t["reason"], "err": t["error"]}
+               for r in rows for t in r["not_run_trials"]]
 
     return {
         "commit": commit, "dataset": DATASET, "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "cases_count": len(ALL), "repeats": max((r["repeats"] for r in rows), default=1), "graphs": graphs, "models": models,
         "planned": planned or len(rows),
         "model_names": {m: pareto.NAMES[m] for m in models}, "notes": notes, "experiments": experiments, "cases": cases,
-        "trials": trials,
+        "trials": trials, "not_run": not_run,
     }
 
 
