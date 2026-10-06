@@ -141,7 +141,7 @@ function address() {
   if (state.files && D.results) query.set("results", D.results);
   if (!state.files) query.set("results", "none");  // a folder that does not exist, so the renderer finds no tables
   if (state.theme) query.set("theme", state.theme);
-  return D.renderer + (String(query) ? "?" + query : "");
+  return D.renderer + (String(query) ? (D.renderer.includes("?") ? "&" : "?") + query : "");
 }
 // The chosen trial, then a trial of each of two other experiments, a wrong one where there is one.
 function beside(sample, chosen) {

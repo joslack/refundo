@@ -12,10 +12,17 @@ its own view of a run's output. When the frame has loaded, and five more times o
     { type: "output" | "reference", data: <a run's outputs, or an example's reference outputs>, metadata: { inputs } }
 The page holds no data. It draws what it is sent:
 
-    a trial's outputs   as evals/langsmith_plugin.py records them: what the agent proposed beside the grader's scores,
-                        the customer's message, the rationale, the reply to the customer and the tokens
+    a trial's outputs   as evals/langsmith_plugin.py records them, in two views with a switch between them
     an answer key       an example's reference outputs: action, amount, sections and the reason
     anything else       the fields as sent, so a run from another project can still be read
+
+A trial's two views:
+
+    Experiments         every experiment of the trial's commit: share right against cost and against seconds in model
+                        calls, each with its Pareto line; one measure for each agent with each model; and the cases
+                        with wrong trials, one column per experiment. The trial's own experiment and case are marked
+    This trial          what the agent proposed beside the grader's scores, the customer's message, the rationale, the
+                        reply to the customer, the tokens, its tool calls, and its case in every experiment
 
 A frame is sent one run, or one answer key. The proposal is shown beside the answer key where the key reaches the page:
 in the same frame, or in another frame of this page on the same screen, which passes it on. Scores other than the
@@ -26,8 +33,9 @@ grader's, other runs and the experiment are not sent, so what the page shows acr
                          steps is a list of steps and a step is the list of labels of the calls one model message made.
                          The page shows the run's own steps, and its experiment's trials merged while their steps agree.
     ?results=<url>       the folder that holds results.csv and cases.csv, the tables evals/pareto.py writes. Without it
-                         the page reads results/<commit>/ beside itself, taking the commit from the run's outputs. It
-                         shows the run's case in every experiment, and every experiment's share right against its cost.
+                         the page reads results/<commit>/ beside itself, taking the commit from the run's outputs.
+    ?view=experiments|trial   the view a trial opens on, experiments without it. The view a reader picks is kept in
+                         the browser, and every frame of the page follows it.
     ?theme=light|dark    the theme; without it the page follows the system's
 
 An address is resolved against this page's. A run is found in the files by its trial name.
@@ -48,11 +56,11 @@ evals/langsmith_render_harness.py writes a page that sends this one real payload
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
 /* Layout: one column for a frame about 480px wide and 300 to 600px tall, the verdict first. The tokens and type are
-   those of evals/explore_page.html. --dim is the gray of chart marks that are not this run's. */
+   those of evals/explore_page.html. --s0 to --s3 are the colors of the models in the charts. */
 :root {
   --bg: #f4f6f8; --surface: #ffffff; --ink: #16202b; --muted: #5b6978; --line: #d7dde4; --accent: #0b6e69;
   --good: #1c7449; --good-bg: #e2f2e9; --part: #8f5a00; --part-bg: #fbeed3; --bad: #b0271f; --bad-bg: #fbe3e1;
-  --dim: #8a95a1;
+  --dim: #8a95a1; --s0: #0b6e69; --s1: #c2570c; --s2: #5b4bc4; --s3: #6f7c89;
   --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
   color-scheme: light;
@@ -61,14 +69,14 @@ evals/langsmith_render_harness.py writes a page that sends this one real payload
   :root:not([data-theme="light"]) {
     --bg: #0f141a; --surface: #171e26; --ink: #e6eaef; --muted: #98a5b3; --line: #2a3440; --accent: #58c4bc;
     --good: #72d19b; --good-bg: #16321f; --part: #e8b75a; --part-bg: #392d12; --bad: #f39088; --bad-bg: #3c1a18;
-    --dim: #626e7b;
+    --dim: #626e7b; --s0: #58c4bc; --s1: #f0a15c; --s2: #a99bf5; --s3: #98a5b3;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f141a; --surface: #171e26; --ink: #e6eaef; --muted: #98a5b3; --line: #2a3440; --accent: #58c4bc;
   --good: #72d19b; --good-bg: #16321f; --part: #e8b75a; --part-bg: #392d12; --bad: #f39088; --bad-bg: #3c1a18;
-  --dim: #626e7b;
+  --dim: #626e7b; --s0: #58c4bc; --s1: #f0a15c; --s2: #a99bf5; --s3: #98a5b3;
   color-scheme: dark;
 }
 [hidden] { display: none !important; }
@@ -138,24 +146,43 @@ summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .cell.some { background: var(--part-bg); color: var(--part); }
 .cell.none { background: var(--bad-bg); color: var(--bad); }
 .cell.here { outline: 2px solid var(--accent); outline-offset: 1px; }
+.over { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 tr.here td { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.tabs { display: flex; align-self: flex-start; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.tabs button { font: inherit; font-size: 12.5px; padding: 3px 12px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.tabs button + button { border-left: 1px solid var(--line); }
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--surface); }
+.tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pick { color: var(--muted); font-size: 12px; }
+.pick select { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; max-width: 100%; }
+th.wrap { white-space: normal; max-width: 104px; }
+td.here { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+.miss th, .miss td { padding: 2px 2px; text-align: center; vertical-align: middle; }
+.miss th[scope="row"], .miss thead th:first-child { text-align: left; padding-right: 8px; }
+.miss th.group { border-bottom: 0; padding-top: 0; }
+.miss th.up { vertical-align: bottom; padding-bottom: 4px; font-family: var(--mono); font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.miss th.up span { display: inline-block; writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
+.miss td.first, .miss th.group + th.group { border-left: 1px solid var(--line); }
+.miss td.num { text-align: right; padding: 2px 6px; }
+.miss .cell { min-width: 16px; min-height: 18px; line-height: 18px; padding: 0 3px; vertical-align: middle; }
 .chart { position: relative; max-width: 560px; }
 .chart svg { display: block; width: 100%; height: auto; }
 .chart text { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
 .chart text.name { font-family: var(--sans); font-size: 11px; fill: var(--ink); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
 .chart .grid { stroke: var(--line); stroke-width: 1; }
-.chart .mark { fill: var(--dim); stroke: var(--surface); stroke-width: 2; }
+.mark { fill: var(--dim); }
+.chart .mark { stroke: var(--surface); stroke-width: 1.5; }
 .chart .spread { stroke: var(--dim); stroke-width: 1; }
-.chart .mine .mark { fill: var(--accent); }
-.chart .mine .spread { stroke: var(--accent); }
+.m0 .mark { fill: var(--s0); } .m1 .mark { fill: var(--s1); } .m2 .mark { fill: var(--s2); } .m3 .mark { fill: var(--s3); }
+.m0 .spread { stroke: var(--s0); } .m1 .spread { stroke: var(--s1); } .m2 .spread { stroke: var(--s2); } .m3 .spread { stroke: var(--s3); }
+.ring { fill: none; stroke: var(--ink); stroke-width: 1.5; }
+.front { fill: none; stroke: var(--ink); stroke-width: 1.3; stroke-dasharray: 1.5 3; stroke-linecap: round; }
 .chart .near .mark { stroke: var(--ink); }
-.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--surface); padding: 3px 7px; border-radius: 4px; font-size: 11.5px; line-height: 1.35; white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--surface); padding: 3px 7px; border-radius: 4px; font-size: 11.5px; line-height: 1.35; white-space: nowrap; transform: translate(-50%, calc(-100% - 12px)); display: flex; flex-direction: column; gap: 3px; }
 .tip b { display: block; font-weight: 600; }
 .key { display: flex; flex-wrap: wrap; gap: 2px 14px; color: var(--muted); font-size: 11.5px; }
 .key span { display: inline-flex; align-items: center; gap: 5px; }
-.key svg { width: 12px; height: 12px; }
-.key .mark { fill: var(--dim); }
-.key .mine .mark { fill: var(--accent); }
+.key svg { width: 12px; height: 12px; flex: none; }
 </style>
 </head>
 <body>
@@ -194,7 +221,23 @@ if (["light", "dark"].includes(params.get("theme"))) document.documentElement.se
 // keys other frames passed on, by task; and the files read so far, by address.
 const state = { output: null, reference: null, shared: {}, files: {} };
 // Kept across redraws, and filled again when a file arrives.
-const tiles = el("section"), strip = el("section"), tree = el("section"), board = el("section");
+const tiles = el("section"), strip = el("section"), tree = el("section"), board = el("section"), overview = el("div", { class: "over" });
+
+// A trial has two views. The one a reader picks is kept in the browser, where every frame of this page reads it.
+const VIEWS = [["experiments", "Experiments"], ["trial", "This trial"]], KEPT = "refundo-view";
+const isView = (name) => VIEWS.some(([known]) => known === name);
+const kept = () => { try { return localStorage.getItem(KEPT); } catch (e) { return null; } };
+let view = [kept(), params.get("view"), "experiments"].find(isView);
+function show(name) {
+  view = name;
+  try { localStorage.setItem(KEPT, name); } catch (e) {}
+  draw();
+}
+window.addEventListener("storage", (event) => { if (event.key === KEPT && isView(event.newValue) && event.newValue !== view) { view = event.newValue; draw(); } });
+// Fill the sections of the view on the screen. The other view's files are read when a reader opens it.
+function refresh() {
+  if (view === "trial") { drawTiles(); drawJourneys(); drawBoard(); } else drawOverview();
+}
 
 // A trial's outputs carry Harbor's fields. An answer key is an action with an amount or sections and none of them.
 const isTrial = (d) => isObject(d) && ["trial_name", "rewards", "reply", "agent_metadata"].some((k) => k in d);
@@ -267,7 +310,7 @@ setTimeout(() => {
 function fetched(address, read) {
   if (!state.files[address]) {
     state.files[address] = { loading: true };
-    read().catch((e) => ({ missing: String(e && e.message || e) })).then((found) => { state.files[address] = found; drawTiles(); drawJourneys(); drawBoard(); });
+    read().catch((e) => ({ missing: String(e && e.message || e) })).then((found) => { state.files[address] = found; refresh(); });
   }
   return state.files[address];
 }
@@ -364,10 +407,11 @@ function trialView({ data: t, inputs, task }, key) {
     key && !scores && submitted ? el("p", { class: "note", text: "The trial has no scores. The page compared the proposal with the answer key." }) : null,
     scores && number(scores.proposals) > 1 ? el("p", { class: "note", text: `The agent submitted ${scores.proposals} proposals. The page shows the last proposal. The grader used the last proposal.` }) : null);
 
-  drawTiles();
-  drawJourneys();
-  drawBoard();
-  return [head, compared, strip,
+  const tabs = el("div", { class: "tabs", role: "tablist" }, VIEWS.map(([name, text]) =>
+    el("button", { type: "button", role: "tab", "aria-selected": String(view === name), onclick: () => show(name), text })));
+  refresh();
+  if (view !== "trial") return [head, tabs, overview];
+  return [head, tabs, compared, strip,
     error ? block("Error", el("p", { class: "text", text: `${error.exception_type || "error"}: ${String(error.exception_message || "").slice(0, 600)}` })) : null,
     typeof inputs.instruction === "string" && inputs.instruction.trim() ? block("Customer message", el("blockquote", { text: inputs.instruction.trim() })) : null,
     !empty(t.rationale) ? block("Proposal rationale", el("p", { class: "text", text: String(t.rationale) })) : null,
@@ -506,44 +550,72 @@ function drawJourneys() {
       + (root.stopped ? ` ${root.stopped} ${root.stopped === 1 ? "trial" : "trials"} made no tool call.` : "") + ` The data comes from the journeys file ${address}.` }));
 }
 
-// ---- the result tables: the same case in every experiment, and every experiment's share right against its cost
-function drawBoard() {
-  const trial = trialEntry(), folder = trial && folderOf(trial.data);
-  if (!folder) return board.replaceChildren();
-  const tables = fetched(folder, async () => {
+// ---- the result tables, read from the folder for this trial's commit
+const distinct = (values) => [...new Set(values)];
+function tablesIn(folder) {
+  return fetched(folder, async () => {
     const [cases, results] = await Promise.all(["cases.csv", "results.csv"].map((name) => get(folder + name, "text")));
     return { cases: rows(cases), results: rows(results) };
   });
+}
+const sameExperiment = (a, b) => a.graph === b.graph && a.model === b.model && a.effort === b.effort;
+// For each name, its leading parts, cut at hyphens, up to where no other name starts the same way.
+function shortNames(names) {
+  return Object.fromEntries(names.map((name) => {
+    const parts = name.split("-");
+    for (let n = 1; n < parts.length; n++) {
+      const start = parts.slice(0, n).join("-");
+      if (!names.some((other) => other !== name && (other === start || other.startsWith(start + "-")))) return [name, start];
+    }
+    return [name, name];
+  }));
+}
+// How a grid of experiments is laid out: agents down the side where there are several, and a sweep of one agent has
+// its models down the side. The other parts of an experiment's name go across the top.
+function layout(results) {
+  const several = distinct(results.map((r) => r.graph)).length > 1;
+  const side = several ? (r) => r.graph : (r) => r.model, top = several ? (r) => `${r.model} · ${r.effort}` : (r) => r.effort;
+  return { side, top, sides: distinct(results.map(side)).sort(), tops: distinct(results.map(top)).sort() };
+}
+const topHead = (text) => el("th", { scope: "col", class: "num code wrap" }, text.split(" · ").flatMap((part, i) => [i ? el("br") : null, part]));
+
+// The trial tab: the same case in every experiment.
+function drawBoard() {
+  const trial = trialEntry(), folder = trial && folderOf(trial.data);
+  if (!folder) return board.replaceChildren();
+  const tables = tablesIn(folder);
   if (tables.loading) return board.replaceChildren();
-  if (tables.missing) return board.replaceChildren(el("p", { class: "note", text: `The page did not read the result tables in ${folder} (${tables.missing}). The page does not show the experiment charts.` }));
+  if (tables.missing) return board.replaceChildren(el("p", { class: "note", text: `The page did not read the result tables in ${folder} (${tables.missing}).` }));
   const mine = tables.cases.find((r) => r.trial === trial.data.trial_name);
-  const here = (r) => Boolean(mine) && r.graph === mine.graph && r.model === mine.model && r.effort === mine.effort;
-  board.replaceChildren(el("h2", { text: "All experiments" }),
-    el("p", { class: "note", text: `The data comes from the result tables in ${folder}.` + (mine ? "" : " The result tables do not contain this trial.") }),
-    ...[caseGrid(tables, trial.task, here), ...costChart(tables.results, here)].filter(Boolean));
+  board.replaceChildren(...[caseGrid(tables, trial.task, (r) => Boolean(mine) && sameExperiment(r, mine)),
+    el("p", { class: "note", text: `The data comes from the result tables in ${folder}.` + (mine ? "" : " The result tables do not contain this trial.") })].filter(Boolean));
 }
 
 function caseGrid(tables, task, here) {
   const of = tables.cases.filter((r) => r.case === task);
   if (!of.length) return null;
-  const distinct = (values) => [...new Set(values)];
-  const graphs = distinct(tables.results.map((r) => r.graph));
-  // Agents down the side where there are several. A sweep of one agent has its models down the side.
-  const side = graphs.length > 1 ? (r) => r.graph : (r) => r.model, top = graphs.length > 1 ? (r) => `${r.model} · ${r.effort}` : (r) => r.effort;
-  const columns = distinct(tables.results.map(top));
-  const body = distinct(tables.results.map(side)).map((name) => el("tr", {}, el("th", { scope: "row", class: "code", text: name }), columns.map((column) => {
+  const { side, top, sides, tops } = layout(tables.results);
+  const body = sides.map((name) => el("tr", {}, el("th", { scope: "row", class: "code", text: name }), tops.map((column) => {
     const experiment = tables.results.find((r) => side(r) === name && top(r) === column);
-    const trials = experiment ? of.filter((r) => r.graph === experiment.graph && r.model === experiment.model && r.effort === experiment.effort) : [];
+    const trials = experiment ? of.filter((r) => sameExperiment(r, experiment)) : [];
     if (!trials.length) return el("td", { class: "num sub", text: "–" });
     const right = trials.filter((r) => r.right === "True").length;
     return el("td", { class: "num" }, el("span", { class: `cell ${right === trials.length ? "all" : right ? "some" : "none"}${here(experiment) ? " here" : ""}`,
       title: `${experiment.graph} · ${experiment.model} · ${experiment.effort}: ${right} of ${trials.length} trials are right.`, text: `${right}/${trials.length}` }));
   })));
   return el("section", {}, el("h2", { text: "This case in each experiment" }),
-    el("div", { class: "scroll" }, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}), columns.map((c) => el("th", { scope: "col", class: "num code", text: c })))), el("tbody", {}, body))),
+    el("div", { class: "scroll" }, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}), tops.map(topHead))), el("tbody", {}, body))),
     el("p", { class: "note", text: "Each cell gives the number of right trials and the number of trials for this case. The cell with the border is the experiment of this trial." }));
 }
 
+// ---- the experiments tab: every experiment of the commit, from the same tables
+let measure = 0;
+const MEASURES = [
+  ["Right trials", "reward", (v) => v.toFixed(1) + "%"], ["Seconds in model calls for each case", "model_seconds_per_case_estimated", (v) => v.toFixed(1)],
+  ["Cost for each case", "cost_per_case_usd", (v) => "$" + v.toFixed(4)], ["Tool calls for each case", "tool_calls_per_case", (v) => v.toFixed(1)],
+  ["Model calls for each case", "model_calls_per_case", (v) => v.toFixed(1)], ["Input tokens for each case", "input_tokens_per_case", count],
+  ["Output tokens for each case", "output_tokens_per_case", count], ["Trials with no proposal", "no_proposal", count],
+];
 const SHAPES = [
   (x, y, r) => `M${x - r},${y}a${r},${r} 0 1,0 ${2 * r},0a${r},${r} 0 1,0 ${-2 * r},0Z`,
   (x, y, r) => `M${x - r * 0.88},${y - r * 0.88}h${r * 1.76}v${r * 1.76}h${-r * 1.76}Z`,
@@ -551,66 +623,187 @@ const SHAPES = [
   (x, y, r) => `M${x},${y - r * 1.2}L${x + r * 1.15},${y + r * 0.85}L${x - r * 1.15},${y + r * 0.85}Z`,
   (x, y, r) => `M${x},${y + r * 1.2}L${x + r * 1.15},${y - r * 0.85}L${x - r * 1.15},${y - r * 0.85}Z`,
 ];
+const COLORS = 4;
 const price = (v) => v >= 0.1 ? "$" + v.toFixed(2) : v >= 0.001 ? "$" + v.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") : "$" + v.toFixed(4);
+const AXES = [
+  { key: "cost_per_case_usd", title: "Right trials and cost", label: "cost for each case in US dollars (logarithmic scale)", log: true, tick: price,
+    say: (v) => `$${v.toFixed(4)} for each case`, less: "a lower cost" },
+  { key: "model_seconds_per_case_estimated", title: "Right trials and time in model calls", label: "seconds in model calls for each case", log: false, tick: String,
+    say: (v) => `${v.toFixed(1)} seconds in model calls for each case`, less: "less time in model calls" },
+];
+// The points that have a higher y than every point with a lower x, from the lowest x to the highest, as in evals/pareto.py.
+function frontier(points) {
+  let best = -Infinity;
+  return [...points].sort((a, b) => a.x - b.x || b.y - a.y).filter((p) => p.y > best && ((best = p.y), true));
+}
 
-// Share right against cost per case, one mark per experiment that has every case, as in evals/pareto.py. This run's
-// experiment is the mark in the accent color with its name beside it; the table under the chart holds every value.
-function costChart(results, here) {
-  const all = results.map((r) => ({ ...r, x: number(r.cost_per_case_usd), y: number(r.reward), sd: number(r.reward_sd), mine: here(r), name: `${r.graph} · ${r.model} · ${r.effort}` }));
-  const shown = all.filter((r) => r.complete === "True" && r.x > 0 && r.y !== null);
-  const graphs = [...new Set(all.map((r) => r.graph))];
-  const table = el("details", {}, el("summary", { text: `Table of the ${all.length} experiments` }), el("div", { class: "scroll" }, el("table", {},
-    el("thead", {}, el("tr", {}, ["Agent", "Model", "Effort"].map((h) => el("th", { scope: "col", text: h })), ["Right trials", "Cost for each case", "Trials"].map((h) => el("th", { scope: "col", class: "num", text: h })))),
-    el("tbody", {}, all.map((r) => el("tr", { class: r.mine ? "here" : null }, el("td", { class: "code", text: r.graph }), el("td", { class: "code", text: r.model }), el("td", { class: "code", text: r.effort }),
-      el("td", { class: "num", text: r.y === null ? "" : `${r.y.toFixed(1)}%${r.sd === null ? "" : ` ±${r.sd.toFixed(1)}`}` }), el("td", { class: "num", text: r.x === null ? "" : "$" + r.x.toFixed(4) }),
-      el("td", { class: "num", text: r.trials + (r.complete === "True" ? "" : " (not complete)") })))))));
-  const title = el("h2", { text: "Right trials and cost of each experiment" });
-  if (!shown.length) return [el("section", {}, title, el("p", { class: "note", text: "No experiment has all cases. The page shows the table only." }), table)];
+function drawOverview() {
+  const trial = trialEntry(), folder = trial && folderOf(trial.data);
+  if (!trial) return overview.replaceChildren();
+  if (!folder) return overview.replaceChildren(el("p", { class: "note", text: "The trial does not give the commit of its agent code. The page cannot find the result tables." }));
+  const tables = tablesIn(folder);
+  if (tables.loading) return overview.replaceChildren(el("p", { class: "sub", text: "The page reads the result tables." }));
+  if (tables.missing) return overview.replaceChildren(el("p", { class: "note", text: `The page did not read the result tables in ${folder} (${tables.missing}).` }));
+  const mine = tables.cases.find((r) => r.trial === trial.data.trial_name);
+  const graphs = distinct(tables.results.map((r) => r.graph)).sort(), models = distinct(tables.results.map((r) => r.model)).sort();
+  const all = tables.results.map((r) => {
+    const trials = tables.cases.filter((t) => sameExperiment(t, r));
+    return { ...r, y: number(r.reward), sd: number(r.reward_sd) || null, mine: Boolean(mine) && sameExperiment(r, mine), name: `${r.graph} · ${r.model} · ${r.effort}`,
+      graphAt: graphs.indexOf(r.graph), modelAt: models.indexOf(r.model), counted: trials.length ? `${trials.filter((t) => t.right === "True").length} of ${trials.length} trials are right` : "" };
+  });
+  const charts = AXES.map((axis) => paretoChart(all, axis)).filter(Boolean);
+  const cases = distinct(tables.cases.map((r) => r.case)).length, repeats = Math.max(0, ...all.map((r) => number(r.repeats) || 0));
+  overview.replaceChildren(...[
+    el("p", { class: "meta", text: [`${all.length} experiments`, `${cases} cases`, repeats > 1 ? `${repeats} trials for each case` : null, `result tables ${folder}`].filter(Boolean).join(" · ") }),
+    charts.length ? keyOf(all, graphs, models) : null, ...charts,
+    charts.length ? el("p", { class: "note", text: "Each mark is one experiment that has all cases. The color shows the model. The shape shows the agent."
+      + (all.some((r) => r.sd) ? " A vertical line gives the standard deviation for one pass through all cases. This value is a lower limit, because it counts only the cases where the passes disagree. Point to a mark to see its values." : " Point to a mark to see its values.")
+      + (charts.length < AXES.length ? " The result tables do not give the time in model calls." : " The time in model calls comes from the LangSmith traces.") }) : null,
+    measureGrid(all), missGrid(tables, all, graphs, models, trial.task, mine), allTable(all)].filter(Boolean));
+}
 
-  const W = 460, H = 222, left = 34, right = 12, top = 24, bottom = 30;
-  const lo = Math.min(...shown.map((r) => r.x)) * 0.7, hi = Math.max(...shown.map((r) => r.x)) * 1.45;
-  const floor = Math.max(0, Math.floor((Math.min(...shown.map((r) => r.y - (r.sd || 0))) - 2) / 10) * 10), ceiling = floor >= 100 ? 110 : 100;
-  const X = (v) => left + Math.log(v / lo) / Math.log(hi / lo) * (W - left - right), Y = (v) => top + (1 - (v - floor) / (ceiling - floor)) * (H - top - bottom);
-  let ticks = [];
-  for (let power = Math.floor(Math.log10(lo)); power <= Math.ceil(Math.log10(hi)); power++) for (const m of [1, 2, 5]) if (m * 10 ** power >= lo && m * 10 ** power <= hi) ticks.push({ m, v: m * 10 ** power });
-  if (ticks.length > 6) ticks = ticks.filter((tick) => tick.m === 1);
+function keyOf(all, graphs, models) {
+  const shape = (i) => svg("svg", { viewBox: "0 0 12 12" }, svg("path", { class: "mark", d: SHAPES[i % SHAPES.length](6, 6, 4) }));
+  return el("p", { class: "key" },
+    models.map((m, i) => el("span", { class: `m${i % COLORS}` }, svg("svg", { viewBox: "0 0 12 12" }, svg("rect", { class: "mark", x: 0, y: 4, width: 12, height: 4, rx: 1 })), m)),
+    graphs.length > 1 ? graphs.map((g, i) => el("span", {}, shape(i), "agent " + g)) : null,
+    el("span", {}, svg("svg", { viewBox: "0 0 16 12", style: "width:16px" }, svg("line", { class: "front", x1: 0, x2: 16, y1: 6, y2: 6 })), "Pareto line"),
+    all.some((r) => r.mine) ? el("span", {}, svg("svg", { viewBox: "0 0 12 12" }, svg("circle", { class: "ring", cx: 6, cy: 6, r: 4.5 })), "the experiment of this trial") : null);
+}
+
+// Share right against one other measure, one mark per experiment that has every case, with the Pareto line of
+// evals/pareto.py. The mark nearest the pointer gives its values, and the table under the charts holds every value.
+function paretoChart(all, axis) {
+  const shown = all.map((r) => ({ ...r, x: number(r[axis.key]) })).filter((r) => r.complete === "True" && r.x > 0 && r.y !== null);
+  if (!shown.length) return null;
+  const W = 460, H = 236, left = 34, right = 14, top = 24, bottom = 30;
+  const xs = shown.map((r) => r.x);
+  let lo = 0, hi, ticks = [];
+  if (axis.log) {
+    lo = Math.min(...xs) * 0.7;
+    hi = Math.max(...xs) * 1.45;
+    for (let power = Math.floor(Math.log10(lo)); power <= Math.ceil(Math.log10(hi)); power++) for (const m of [1, 2, 5]) if (m * 10 ** power >= lo && m * 10 ** power <= hi) ticks.push({ m, v: m * 10 ** power });
+    if (ticks.length > 6) ticks = ticks.filter((tick) => tick.m === 1);
+  } else {
+    const span = Math.max(...xs) - Math.min(...xs) || Math.max(...xs), pad = span * 0.06;
+    const step = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500].find((s) => (span + 2 * pad) / s <= 8) || 1000;
+    lo = Math.max(0, Math.floor((Math.min(...xs) - pad) / step) * step);
+    hi = Math.ceil((Math.max(...xs) + pad) / step) * step;
+    for (let v = lo; v <= hi + step / 1000; v += step) ticks.push({ v: Number(v.toFixed(1)) });
+  }
+  const X = axis.log ? (v) => left + Math.log(v / lo) / Math.log(hi / lo) * (W - left - right) : (v) => left + (v - lo) / (hi - lo) * (W - left - right);
+  const low = Math.min(...shown.map((r) => r.y - (r.sd || 0))), step = low < 50 ? 20 : low < 80 ? 10 : 5;
+  const floor = Math.max(0, Math.min(100 - step, Math.floor((low - 1) / step) * step)), ceiling = 100;
+  const Y = (v) => top + (1 - (v - floor) / (ceiling - floor)) * (H - top - bottom);
   const levels = [];
-  for (let v = floor; v <= ceiling; v += ceiling - floor > 50 ? 20 : 10) levels.push(v);
-  const point = (r) => svg("g", { class: r.mine ? "mine" : null },
+  for (let v = floor; v <= ceiling; v += step) levels.push(v);
+  const line = frontier(shown.filter((r) => r.reliable !== "False"));
+  const point = (r) => svg("g", { class: `m${r.modelAt % COLORS}${r.mine ? " mine" : ""}` },
     r.sd ? svg("line", { class: "spread", x1: X(r.x), x2: X(r.x), y1: Y(Math.min(ceiling, r.y + r.sd)), y2: Y(Math.max(floor, r.y - r.sd)) }) : null,
-    svg("path", { class: "mark", d: SHAPES[graphs.indexOf(r.graph) % SHAPES.length](X(r.x), Y(r.y), r.mine ? 5.5 : 4) }));
+    r.mine ? svg("circle", { class: "ring", cx: X(r.x), cy: Y(r.y), r: 9 }) : null,
+    svg("path", { class: "mark", d: SHAPES[r.graphAt % SHAPES.length](X(r.x), Y(r.y), 4.5) }));
   const marks = shown.filter((r) => !r.mine).concat(shown.filter((r) => r.mine)).map((r) => ({ r, node: point(r) }));
-  const mine = shown.find((r) => r.mine);
-  const drawing = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `The chart shows the right trials and the cost of ${shown.length} experiments. The table gives the values.` },
+  const drawing = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `The chart shows the right trials and the ${axis.label} of ${shown.length} experiments. The table gives the values.` },
     levels.map((v) => [svg("line", { class: "grid", x1: left, x2: W - right, y1: Y(v), y2: Y(v) }), svg("text", { x: left - 6, y: Y(v) + 3.5, "text-anchor": "end", text: String(v) })]),
     svg("text", { x: 0, y: 8, text: "right trials (%)" }),
-    ticks.map((tick) => svg("text", { x: X(tick.v), y: H - bottom + 13, "text-anchor": "middle", text: price(tick.v) })),
-    svg("text", { x: (left + W - right) / 2, y: H - 3, "text-anchor": "middle", text: "cost for each case in US dollars (logarithmic scale)" }),
-    marks.map((m) => m.node),
-    mine ? svg("text", { class: "name", x: X(mine.x) + (X(mine.x) > W * 0.55 ? -9 : 9), y: Y(mine.y) + (Y(mine.y) < top + 14 ? 14 : -8), "text-anchor": X(mine.x) > W * 0.55 ? "end" : "start", text: mine.name }) : null);
+    ticks.map((tick) => svg("text", { x: X(tick.v), y: H - bottom + 13, "text-anchor": "middle", text: axis.tick(tick.v) })),
+    svg("text", { x: (left + W - right) / 2, y: H - 3, "text-anchor": "middle", text: axis.label }),
+    line.length > 1 ? svg("polyline", { class: "front", points: line.map((p) => `${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(" ") }) : null,
+    marks.map((m) => m.node));
   const tip = el("div", { class: "tip", hidden: true });
   const chart = el("div", { class: "chart" }, drawing, tip);
-  // The mark nearest the pointer answers, so a small mark does not have to be hit.
+  // The mark nearest the pointer answers, with every mark drawn on the same place, so a small or covered mark can be read.
   drawing.addEventListener("pointermove", (event) => {
     const box = drawing.getBoundingClientRect(), scale = box.width / W;
     const at = { x: (event.clientX - box.left) / scale, y: (event.clientY - box.top) / scale };
-    const far = (m) => Math.hypot(X(m.r.x) - at.x, Y(m.r.y) - at.y);
-    const near = marks.reduce((a, b) => far(a) <= far(b) ? a : b);
-    for (const m of marks) m.node.classList.toggle("near", m === near && far(near) < 40);
-    tip.hidden = far(near) >= 40;
+    const far = (m, from) => Math.hypot(X(m.r.x) - from.x, Y(m.r.y) - from.y);
+    const near = marks.reduce((a, b) => far(a, at) <= far(b, at) ? a : b);
+    const together = far(near, at) < 40 ? marks.filter((m) => far(m, { x: X(near.r.x), y: Y(near.r.y) }) < 7) : [];
+    for (const m of marks) m.node.classList.toggle("near", together.includes(m));
+    tip.hidden = !together.length;
     if (tip.hidden) return;
-    tip.replaceChildren(el("b", { text: `${near.r.y.toFixed(1)}% right${near.r.sd === null ? "" : ` (±${near.r.sd.toFixed(1)})`} · $${near.r.x.toFixed(4)} for each case` }), near.r.name);
-    tip.style.left = Math.max(125, Math.min(box.width - 125, X(near.r.x) * scale)) + "px";
-    tip.style.top = Math.max(34, Y(near.r.y) * scale) + "px";
+    tip.replaceChildren(...together.map((m) => el("div", {}, el("b", { text: m.r.name }),
+      el("div", { text: `${m.r.y.toFixed(1)}%${m.r.sd === null ? "" : ` ±${m.r.sd.toFixed(1)}`}${m.r.counted ? ` · ${m.r.counted}` : " right"}` }), axis.say(m.r.x))));
+    tip.style.left = Math.max(120, Math.min(box.width - 120, X(near.r.x) * scale)) + "px";
+    tip.style.top = Math.max(22 + 50 * together.length, Y(near.r.y) * scale) + "px";
   });
   drawing.addEventListener("pointerleave", () => { tip.hidden = true; for (const m of marks) m.node.classList.remove("near"); });
-  const sample = (i, mineToo) => svg("svg", { viewBox: "0 0 12 12", class: mineToo ? "mine" : null }, svg("path", { class: "mark", d: SHAPES[i % SHAPES.length](6, 6, 4) }));
-  const legend = el("p", { class: "key" }, graphs.length > 1 ? graphs.map((g, i) => shown.some((r) => r.graph === g && !r.mine) ? el("span", {}, sample(i), g) : null) : null,
-    mine ? el("span", {}, sample(graphs.indexOf(mine.graph), true), "the experiment of this trial") : null);
   const unshown = all.length - shown.length;
-  return [el("section", {}, title, chart, legend,
-    el("p", { class: "note", text: "Each mark is one experiment that has all cases." + (shown.some((r) => r.sd) ? " A vertical line gives the standard deviation for one pass through all cases." : "")
-      + (unshown ? ` The table also shows ${unshown === 1 ? "1 experiment that does" : `${unshown} experiments that do`} not have all cases.` : "") }), table)];
+  return el("section", {}, el("h2", { text: axis.title }), chart,
+    el("p", { class: "note", text: (line.length > 1 ? `Each experiment on the Pareto line has more right trials than every experiment with ${axis.less}.` : "")
+      + (unshown ? ` The chart does not show ${unshown === 1 ? "1 experiment that does" : `${unshown} experiments that do`} not have all cases.` : "") }));
+}
+
+// One measure for every experiment, laid out as the experiments are: each agent with each model.
+function measureGrid(all) {
+  const { side, top, sides, tops } = layout(all);
+  const [title, key, show] = MEASURES[measure];
+  const body = sides.map((name) => el("tr", {}, el("th", { scope: "row", class: "code", text: name }), tops.map((column) => {
+    const r = all.find((x) => side(x) === name && top(x) === column), v = r ? number(r[key]) : null;
+    if (v === null) return el("td", { class: "num sub", text: "–" });
+    return el("td", { class: "num" + (r.mine ? " here" : ""), title: `${r.name}: ` + (r.complete === "True" ? r.counted || `${r.trials} trials` : `${r.trials} trials, not complete`) + "." },
+      show(v), key === "reward" && r.sd !== null ? el("span", { class: "sub", text: ` ±${r.sd.toFixed(1)}` }) : null, r.complete === "True" ? null : el("span", { class: "sub", text: " *" }));
+  })));
+  const pick = el("select", { "aria-label": "Measure", onchange: (event) => { measure = Number(event.target.value); drawOverview(); } },
+    MEASURES.map(([name, k], i) => all.some((r) => number(r[k]) !== null) ? el("option", { value: i, selected: i === measure, text: name }) : null));
+  return el("section", {}, el("h2", { text: "Each experiment" }), el("label", { class: "pick" }, "Measure ", pick),
+    el("div", { class: "scroll" }, el("table", {}, el("thead", {}, el("tr", {}, el("th", {}), tops.map(topHead))), el("tbody", {}, body))),
+    el("p", { class: "note", text: `${title}.` + (all.some((r) => r.mine) ? " The cell with the color is the experiment of this trial." : "")
+      + (all.some((r) => r.complete !== "True") ? " An asterisk shows an experiment that does not have all cases." : "") }));
+}
+
+// Every case that some experiment got wrong, the most wrong trials first, with one column per experiment.
+function missGrid(tables, all, graphs, models, task, mine) {
+  const named = shortNames(models), manyEfforts = all.some((a) => all.some((b) => a !== b && a.graph === b.graph && a.model === b.model));
+  const columns = [...all].sort((a, b) => a.graphAt - b.graphAt || a.modelAt - b.modelAt || (a.effort < b.effort ? -1 : 1));
+  const groupOf = graphs.length > 1 ? (r) => r.graph : (r) => r.model;
+  const under = graphs.length > 1 ? (r) => named[r.model] + (manyEfforts ? " " + r.effort : "") : (r) => r.effort;
+  const id = (r) => `${r.graph}|${r.model}|${r.effort}`;
+  const byCase = new Map();
+  let trials = 0, wrong = 0;
+  for (const r of tables.cases) {
+    const found = byCase.get(r.case) || byCase.set(r.case, { wrong: 0, trials: 0, cells: {} }).get(r.case);
+    const cell = found.cells[id(r)] || (found.cells[id(r)] = { wrong: 0, trials: 0 });
+    const miss = r.right !== "True";
+    cell.trials++; found.trials++; trials++;
+    if (miss) { cell.wrong++; found.wrong++; wrong++; }
+  }
+  const missed = [...byCase].filter(([, found]) => found.wrong).sort((a, b) => b[1].wrong - a[1].wrong || (a[0] < b[0] ? -1 : 1));
+  const silent = all.reduce((n, r) => n + (number(r.no_proposal) || 0), 0);
+  const title = el("h2", { text: "Cases with wrong trials" });
+  const total = el("p", { text: `${count(wrong)} of ${count(trials)} trials are wrong. The wrong trials are in ${missed.length} of ${byCase.size} cases.`
+    + (silent ? ` ${count(silent)} ${silent === 1 ? "trial has" : "trials have"} no proposal.` : "") });
+  if (!missed.length) return el("section", {}, title, total);
+  const first = (r, i) => i === 0 || groupOf(columns[i - 1]) !== groupOf(r);
+  const up = (text, title) => el("th", { scope: "col", class: "up", title }, el("span", { text }));
+  const groups = distinct(columns.map(groupOf)).map((g) => el("th", { scope: "colgroup", class: "code group", colspan: columns.filter((r) => groupOf(r) === g).length, text: g }));
+  const body = missed.map(([name, found]) => el("tr", { class: name === task ? "here" : null }, el("th", { scope: "row", class: "code", text: name }),
+    columns.map((r, i) => {
+      const cell = found.cells[id(r)];
+      const here = Boolean(mine) && name === task && sameExperiment(r, mine);
+      if (!cell) return el("td", { class: first(r, i) ? "first sub" : "sub", text: "–" });
+      return el("td", { class: first(r, i) ? "first" : null, title: `${name} · ${r.name}: ${cell.wrong} of ${cell.trials} trials are wrong.` },
+        el("span", { class: `cell${cell.wrong === cell.trials ? " none" : cell.wrong ? " some" : ""}${here ? " here" : ""}`, text: cell.wrong ? String(cell.wrong) : "" }));
+    }),
+    el("td", { class: "num first", text: String(found.wrong) }),
+    el("td", { class: "num", text: String(columns.filter((r) => found.cells[id(r)] && found.cells[id(r)].wrong).length) })));
+  return el("section", {}, title, total,
+    el("div", { class: "scroll" }, el("table", { class: "miss" },
+      el("thead", {}, el("tr", {}, el("th", {}), groups, el("th", { colspan: 2 })),
+        el("tr", {}, el("th", { scope: "col", text: "Case" }), columns.map((r) => up(under(r), r.name)), up("wrong trials"), up("experiments"))),
+      el("tbody", {}, body))),
+    el("p", { class: "note", text: "Each cell gives the number of wrong trials of one case in one experiment. An empty cell shows that all trials are right. "
+      + "The last two columns give the wrong trials of the case, and the number of experiments that have a wrong trial." + (missed.some(([name]) => name === task) ? " The row with the color is the case of this trial." : "") }));
+}
+
+function allTable(all) {
+  const shown = MEASURES.filter(([, key]) => all.some((r) => number(r[key]) !== null));
+  const sorted = [...all].sort((a, b) => (b.y === null ? -1 : b.y) - (a.y === null ? -1 : a.y) || (number(a.cost_per_case_usd) || 0) - (number(b.cost_per_case_usd) || 0));
+  return el("details", {}, el("summary", { text: `Table of the ${all.length} experiments` }), el("div", { class: "scroll" }, el("table", {},
+    el("thead", {}, el("tr", {}, ["Agent", "Model", "Effort"].map((h) => el("th", { scope: "col", text: h })), shown.map(([name]) => el("th", { scope: "col", class: "num wrap", text: name })), el("th", { scope: "col", class: "num", text: "Trials" }))),
+    el("tbody", {}, sorted.map((r) => el("tr", { class: r.mine ? "here" : null }, el("td", { class: "code", text: r.graph }), el("td", { class: "code", text: r.model }), el("td", { class: "code", text: r.effort }),
+      shown.map(([, key, show]) => el("td", { class: "num", text: number(r[key]) === null ? "" : show(number(r[key])) + (key === "reward" && r.sd !== null ? ` ±${r.sd.toFixed(1)}` : "") })),
+      el("td", { class: "num", text: r.trials + (r.complete === "True" ? "" : " (not complete)") })))))));
 }
 </script>
 </body>
