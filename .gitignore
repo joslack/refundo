@@ -28,3 +28,9 @@ jobs/
 
 # Copied in by evals/build.py
 agents/policy.md
+
+# The LangGraph development server keeps its threads here
+.langgraph_api/
+
+# LangChain's Agent Chat UI, fetched by service/run.py
+service/chat-ui/

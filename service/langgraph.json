@@ -1,0 +1,6 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "refunds": "./agent.py:make_graph"
+  }
+}
