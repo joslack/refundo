@@ -28,6 +28,10 @@ def chat_model(configurable: dict):
         limiter = InMemoryRateLimiter(requests_per_second=pace / 60, check_every_n_seconds=0.1, max_bucket_size=pace / 2)
         limiter.available_tokens = pace / 2
         settings["rate_limiter"] = limiter
+    if name.startswith("anthropic:"):
+        # LangChain gives an Anthropic model it does not know a cap of 4,096 output tokens, thinking included. At
+        # the highest effort Claude Haiku 5.5 spends all of that on thinking and never calls a tool.
+        settings.setdefault("max_tokens", 32_000)
     if name.startswith("openai:"):
         # Some OpenAI models accept tools only on the Responses API, so every OpenAI model goes through it.
         settings.setdefault("use_responses_api", True)
