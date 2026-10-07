@@ -51,7 +51,11 @@ def decision_schema(submit) -> dict:
 async def make_graph(config):
     configurable = config["configurable"]
     tools = {tool.name: tool for tool in await tools_for(configurable, TOOLS)}
-    model = chat_model(configurable).with_structured_output(decision_schema(tools["submit_proposal"]), include_raw=True)
+    # LangChain gets a structured answer from an Anthropic model by forcing a tool call unless told otherwise, and
+    # Claude Haiku 5.5 does no thinking before a forced tool call. Asked for a JSON schema, it thinks first, which
+    # is what the OpenAI and Fireworks models already do with no setting.
+    how = {"method": "json_schema"} if configurable.get("model", "").startswith("anthropic:") else {}
+    model = chat_model(configurable).with_structured_output(decision_schema(tools["submit_proposal"]), include_raw=True, **how)
 
     async def call(name: str, arguments: dict):
         """Call a tool as the model would have, so the result is a tool message in the conversation."""
