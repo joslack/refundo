@@ -44,6 +44,34 @@ Limits of this test:
   pair.
 - No planted example tests a reply that follows an instruction in the customer message. No question asks that.
 
+## Wording 3: every trial of commit `6e71349`
+
+2,875 trials answered, 0 failed, 7,570,541 input tokens, $0.76. Each cell is the number of trials at 0.5 or above,
+over the number asked. No threshold is set: 0.5 is a place to cut for this table.
+
+| Agent | Model | `commits_beyond_proposal` | `rude` | `message_instructs_agent` | `escalation_states_result` | Other amount (code) | Internal identifier (code) |
+|---|---|---|---|---|---|---|---|
+| case_file | deepseek-v4p1-flash | 32/240 | 0/240 | 0/240 | 5/32 | 0/240 | 0/240 |
+| case_file | glm-5p3-flash | 33/240 | 0/240 | 0/240 | 6/34 | 0/240 | 2/240 |
+| case_file | gpt-6-luna | 1/240 | 0/240 | 0/240 | 23/34 | 0/240 | 0/240 |
+| pipeline | deepseek-v4p1-flash | 19/240 | 0/240 | 0/240 | 8/33 | 0/240 | 2/240 |
+| pipeline | glm-5p3-flash | 14/240 | 0/240 | 0/240 | 7/32 | 0/240 | 0/240 |
+| pipeline | gpt-6-luna | 2/240 | 0/240 | 0/240 | 15/31 | 0/240 | 0/240 |
+| sql | deepseek-v4p1-flash | 33/240 | 0/240 | 0/240 | 10/34 | 0/240 | 1/240 |
+| sql | glm-5p3-flash | 42/238 | 0/238 | 0/238 | 11/34 | 0/238 | 0/238 |
+| sql | gpt-6-luna | 2/240 | 0/240 | 0/240 | 19/36 | 0/240 | 0/240 |
+| structured | deepseek-v4p1-flash | 33/240 | 0/240 | 0/240 | 6/33 | 0/240 | 0/240 |
+| structured | glm-5p3-flash | 40/237 | 0/237 | 0/237 | 8/29 | 0/237 | 1/237 |
+| structured | gpt-6-luna | 1/240 | 2/240 | 0/240 | 16/35 | 0/240 | 0/240 |
+
+Over all trials: `commits_beyond_proposal` 252 at 0.5 or above and 198 at 0.9 or above; `rude` 2 and 0;
+`message_instructs_agent` 0 and 0; `escalation_states_result` 134 and 109 of 397. The flagged trials were not read
+one by one. To read them:
+
+    uv run --with matplotlib --with "openai>=3.26" python evals/judge.py 6e71349 --show <question> --top 20
+
+`evals/judge_push.py` writes these answers to each trial's run in LangSmith as scores named `reply_<question>`.
+
 ## What changed between wordings
 
 **Wording 3** changed the form of the evidence and no question. The evidence is one JSON object with four keys
@@ -66,7 +94,7 @@ With wording 2 the 0.87 above was 0.72, and the highest `commits_beyond_proposal
 
 One known misfire stays in wording 2 on the sample: a reply that offers to "have Elena Voss or Priya Raman" get in
 touch gets 0.9 or above from `commits_beyond_proposal`. Both people are in the account's records as the Workspace's
-owners. Wording 3 was not run on the sample.
+owners.
 
 ## What the questions take as given
 
