@@ -51,6 +51,9 @@ MODELS = {
     "glm": (FIREWORKS + "glm-5p3-flash", ["low", "medium", "high"]),
     "nemotron": (FIREWORKS + "nemotron-lightning-3p5-30b-a3b", ["none", "low", "medium", "high"]),
     "oss": (FIREWORKS + "gpt-oss-120b", ["low", "medium", "high"]),
+    # Added 2026-10-07, the day it came out; the efforts are from Anthropic's Models API. Nothing below asks it a
+    # test question before a run, because that check speaks the chat completions format.
+    "haiku": ("anthropic/claude-haiku-5-5", ["low", "medium", "high", "xhigh", "max"]),
 }
 DEFAULT_MODEL = "luna"
 EFFORT_ORDER = ["low", "high", "none", "medium", "xhigh", "max"]  # the order a sweep runs them in

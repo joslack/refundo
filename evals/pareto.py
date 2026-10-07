@@ -57,16 +57,21 @@ EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"]
 HALO = [withStroke(linewidth=2.5, foreground="white")]  # keeps a label readable where it crosses a line
 # USD per million tokens (input, cached input, cache write, output), read on 2026-10-05 from
 # developers.openai.com/api/docs/pricing and docs.fireworks.ai/serverless/pricing. Reasoning tokens are billed as
-# output. Only the two Luna models charge for writing to the cache, at 1.25 times the input price.
+# output. Of those models, only the two Luna models charge for writing to the cache, at 1.25 times the input price.
 PRICES = {
     "gpt-6-luna": (0.10, 0.01, 0.125, 0.50), "gpt-5.6-luna": (0.20, 0.02, 0.25, 1.20),
     "gpt-5.4-mini": (0.75, 0.075, 0.75, 4.50), "gpt-5.4-nano": (0.20, 0.02, 0.20, 1.25),
     "deepseek-v4p1-flash": (0.30, 0.006, 0.30, 1.20), "glm-5p3-flash": (0.15, 0.03, 0.15, 0.50),
     "nemotron-lightning-3p5-30b-a3b": (0.05, 0.01, 0.05, 0.20), "gpt-oss-120b": (0.15, 0.015, 0.15, 0.60),
+    # Anthropic prices each request by the length of its prompt: these are the prices up to 100,000 tokens, and a
+    # longer prompt costs five times as much on every line (anthropic.com, read 2026-10-07). A case here sends
+    # 20,000 to 35,000 input tokens over all of its calls, so no single prompt comes near the higher prices.
+    "claude-haiku-5-5": (0.10, 0.01, 0.125, 0.50),
 }
 # What a model does when no effort is set. OpenAI's API reports it. The Fireworks models reason by default, and
 # their API does not say at what effort.
-DEFAULT_EFFORT = {"gpt-6-luna": "medium", "gpt-5.6-luna": "medium", "gpt-5.4-mini": "none", "gpt-5.4-nano": "none"}
+DEFAULT_EFFORT = {"gpt-6-luna": "medium", "gpt-5.6-luna": "medium", "gpt-5.4-mini": "none", "gpt-5.4-nano": "none",
+                  "claude-haiku-5-5": "medium"}
 # Artificial Analysis Intelligence Index v4.3.2, read on 2026-10-05 from artificialanalysis.ai/models/<model>,
 # by our name for the effort.
 AA_INDEX = {
