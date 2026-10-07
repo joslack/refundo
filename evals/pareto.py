@@ -4,17 +4,19 @@
 
 Reads the Harbor job folders in evals/jobs/ whose names carry the given commit (the one evals/run.py put in
 each job's name) and writes, to evals/results/<commit>/:
-    results.csv      one row per experiment: scores, calls, seconds, tokens, cost per case
+    results.csv      one row per experiment: scores, calls, seconds, tokens and cost per case
     cases.csv        one row per trial: what was proposed, how it scored, calls, seconds, tokens, cost
-    misses.csv       one row per case and experiment with a wrong trial: what was expected and what was given
+    misses.csv       one row per case and experiment with a wrong trial: what was expected, what was given, and
+                     which models missed the same case with the same agent
     pareto.png       reward against cost per case, one line per agent and model across its reasoning efforts
     pareto-top.png   the same, zoomed on the experiments that are cheap and at least 80% right
     index.png        reward against the Artificial Analysis Intelligence Index for the same model and effort
 
 An experiment is one agent graph, model and reasoning effort. Reward is the share of its trials where the action
 and the amount were both right. Where each case was run more than once (`run.py -k`), the reward is over all the
-trials, and results.csv also says how far a single run's score would stray from it (reward_sd) and how many cases
-were right every time, some of the time, and never. Cost per case is the experiment's tokens at the provider's
+trials, and results.csv also gives the spread between repeats (reward_sd) and how many cases were right every time,
+some of the time, and never. The spread counts only cases whose repeats disagree, so with a few repeats it is a lower
+bound: a case that fails one time in five still comes out right three times in three about half the time. Cost per case is the experiment's tokens at the provider's
 list price, divided by the number of trials. The charts show experiments that have every case, the same number of
 times.
 
@@ -128,7 +130,8 @@ def trials_of(job: Path, model: str) -> list[dict]:
             "amount": scores.get("amount") == 1.0, "sections": scores.get("sections") == 1.0,
             "proposal": submitted[-1] if submitted else None, "errored": bool(trial.get("exception_info")),
             "error": (trial.get("exception_info") or {}).get("exception_type", ""),
-            "model_calls": sum(m.get("type") == "ai" for m in messages),
+            # A model's message carries its token usage. A reply that a fixed graph wrote in code does not.
+            "model_calls": sum(m.get("type") == "ai" and bool(m.get("usage_metadata")) for m in messages),
             "tool_calls": sum(m.get("type") == "tool" for m in messages),
             "agent_seconds": round((datetime.fromisoformat(ran["finished_at"])
                                     - datetime.fromisoformat(ran["started_at"])).total_seconds(), 1) if timed else "",
@@ -171,7 +174,8 @@ def experiments(commit: str) -> list[dict]:
             "trials": len(trials), "repeats": min(times), "complete": len(by_case) == CASES and len(times) == 1,
             "reliable": model not in UNRELIABLE,
             "reward": share([t["right"] for t in trials]),
-            # One run of the 80 cases would land this many points from the reward, give or take, by chance alone.
+            # How far one pass over the cases strays from the reward, from the cases whose repeats disagree. A case
+            # that was right every time adds nothing, so this is a lower bound.
             "reward_sd": round(100 * sum(p * (1 - p) for p in rates) ** 0.5 / len(rates), 1) if repeated else "",
             "cases_always_right": sum(p == 1 for p in rates) if repeated else "",
             "cases_sometimes_right": sum(0 < p < 1 for p in rates) if repeated else "",
@@ -184,6 +188,9 @@ def experiments(commit: str) -> list[dict]:
             "model_calls_per_case": round(sum(t["model_calls"] for t in trials) / len(trials), 1),
             "tool_calls_per_case": round(sum(t["tool_calls"] for t in trials) / len(trials), 1),
             "agent_seconds_per_case": round(median(seconds), 1) if seconds and not paced else "",
+            "input_tokens_per_case": round(sum(t["input_tokens"] for t in trials) / len(trials)),
+            "cached_tokens_per_case": round(sum(t["cached_tokens"] for t in trials) / len(trials)),
+            "output_tokens_per_case": round(sum(t["output_tokens"] for t in trials) / len(trials)),
             "input_tokens": sum(t["input_tokens"] for t in trials), "cached_tokens": sum(t["cached_tokens"] for t in trials),
             "cache_write_tokens": sum(t["cache_write_tokens"] for t in trials),
             "output_tokens": sum(t["output_tokens"] for t in trials),
@@ -265,7 +272,7 @@ def pareto_chart(rows: list[dict], path: Path, top: bool = False) -> None:
     fig, ax = plt.subplots(figsize=(12, 6.8), dpi=160)
     style(ax, "Reward against cost per case" + (": the cheap, accurate corner" if top else ", by model and reasoning effort"),
           (f"Agent graph `{graphs[0]}`, " if len(graphs) == 1 else "") + f"{CASES} cases"
-          + (f", each run {min(repeats)} times; bars show how far a single run would stray" if repeats != {1} else "")
+          + (f", each run {min(repeats)} times; bars show the spread between repeats, a lower bound" if repeats != {1} else "")
           + ". Each point is one experiment; a line joins one model's reasoning efforts. Hollow point: no effort set.")
     ax.fill_between([left, middle_cost], middle_reward, 100, color="#dff5df", zorder=0,
                     label="Cheaper and better than the median experiment")
@@ -420,6 +427,12 @@ def misses(rows: list[dict]) -> list[dict]:
                         "right": len(trials) - len(wrong), "trials": len(trials),
                         "expected_action": expected[case][0], "expected_amount_cents": expected[case][1],
                         "given": "; ".join(f"{answer} ({n})" for answer, n in given.most_common())})
+    # A case that several models miss with one agent points at the agent or the case; one model alone, at the model.
+    together: dict[tuple[str, str], list[str]] = {}
+    for m in out:
+        together.setdefault((m["graph"], m["case"]), []).append(m["model"])
+    for m in out:
+        m["models_missing_with_this_graph"] = "; ".join(together[m["graph"], m["case"]])
     return sorted(out, key=lambda m: m["case"])
 
 
@@ -451,7 +464,7 @@ def write_csv(rows: list[dict], folder: Path) -> None:
     missed = misses(rows)
     with (folder / "misses.csv").open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["case", "graph", "model", "effort", "right", "trials", "expected_action",
-                                               "expected_amount_cents", "given"])
+                                               "expected_amount_cents", "given", "models_missing_with_this_graph"])
         writer.writeheader()
         writer.writerows(missed)
 

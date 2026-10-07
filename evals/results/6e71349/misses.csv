@@ -1,0 +1,69 @@
+case,graph,model,effort,right,trials,expected_action,expected_amount_cents,given,models_missing_with_this_graph
+an-06,sql,glm-5p3-flash,high,2,3,cash_refund,37808,deny 0 (1),glm-5p3-flash
+an-08,sql,gpt-6-luna,high,2,3,account_credit,36666,escalate 36666 (1),gpt-6-luna
+an-09b,sql,deepseek-v4p1-flash,medium,2,3,deny,0,account_credit 36666 (1),deepseek-v4p1-flash
+an-11,sql,gpt-6-luna,high,1,3,cash_refund,27000,cash_refund 29160 (2),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+an-11,sql,deepseek-v4p1-flash,medium,1,3,cash_refund,27000,cash_refund 29160 (2),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+an-11,sql,glm-5p3-flash,high,0,3,cash_refund,27000,cash_refund 29160 (3),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+auth-08,sql,glm-5p3-flash,high,1,3,no_action,0,nothing (2),glm-5p3-flash
+auth-08,structured,glm-5p3-flash,high,1,3,no_action,0,nothing (2),glm-5p3-flash
+be-02,sql,gpt-6-luna,high,2,3,deny,0,cash_refund 0 (1),gpt-6-luna
+be-07,sql,glm-5p3-flash,high,2,3,deny,0,deny 8000 (1),glm-5p3-flash
+be-08b,sql,deepseek-v4p1-flash,medium,2,3,deny,0,cash_refund 8000 (1),deepseek-v4p1-flash
+be-11,case_file,gpt-6-luna,high,2,3,deny,0,cash_refund 12000 (1),gpt-6-luna
+be-14,sql,gpt-6-luna,high,2,3,deny,0,cash_refund 8000 (1),gpt-6-luna
+be-15,case_file,gpt-6-luna,high,2,3,escalate,0,escalate 8000 (1),gpt-6-luna; glm-5p3-flash
+be-15,case_file,glm-5p3-flash,high,1,3,escalate,0,escalate 8000 (2),gpt-6-luna; glm-5p3-flash
+be-15,pipeline,glm-5p3-flash,high,2,3,escalate,0,escalate 8000 (1),glm-5p3-flash
+be-15,sql,glm-5p3-flash,high,0,3,escalate,0,escalate 8000 (3),glm-5p3-flash
+be-15,structured,glm-5p3-flash,high,1,3,escalate,0,escalate 8000 (2),glm-5p3-flash
+be-16,case_file,gpt-6-luna,high,2,3,escalate,8000,escalate 10000 (1),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-16,case_file,deepseek-v4p1-flash,medium,1,3,escalate,8000,escalate 10000 (2),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-16,case_file,glm-5p3-flash,high,2,3,escalate,8000,escalate 10000 (1),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-16,pipeline,gpt-6-luna,high,2,3,escalate,8000,escalate 10000 (1),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-16,pipeline,deepseek-v4p1-flash,medium,0,3,escalate,8000,escalate 10000 (3),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-16,pipeline,glm-5p3-flash,high,2,3,escalate,8000,escalate 10000 (1),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-16,sql,deepseek-v4p1-flash,medium,0,3,escalate,8000,escalate 10000 (3),deepseek-v4p1-flash; glm-5p3-flash
+be-16,sql,glm-5p3-flash,high,0,3,escalate,8000,escalate 10000 (3),deepseek-v4p1-flash; glm-5p3-flash
+be-16,structured,gpt-6-luna,high,2,3,escalate,8000,escalate 10000 (1),gpt-6-luna
+be-19,case_file,gpt-6-luna,high,0,3,cash_refund,16000,cash_refund 8000 (3),gpt-6-luna; glm-5p3-flash
+be-19,case_file,glm-5p3-flash,high,2,3,cash_refund,16000,cash_refund 8000 (1),gpt-6-luna; glm-5p3-flash
+be-19,pipeline,gpt-6-luna,high,0,3,cash_refund,16000,cash_refund 8000 (3),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-19,pipeline,deepseek-v4p1-flash,medium,1,3,cash_refund,16000,cash_refund 8000 (2),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-19,pipeline,glm-5p3-flash,high,2,3,cash_refund,16000,cash_refund 8000 (1),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-19,sql,gpt-6-luna,high,0,3,cash_refund,16000,cash_refund 8000 (3),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-19,sql,deepseek-v4p1-flash,medium,2,3,cash_refund,16000,cash_refund 8000 (1),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-19,sql,glm-5p3-flash,high,1,3,cash_refund,16000,cash_refund 8000 (2),gpt-6-luna; deepseek-v4p1-flash; glm-5p3-flash
+be-19,structured,gpt-6-luna,high,0,3,cash_refund,16000,cash_refund 8000 (3),gpt-6-luna; glm-5p3-flash
+be-19,structured,glm-5p3-flash,high,2,3,cash_refund,16000,cash_refund 8000 (1),gpt-6-luna; glm-5p3-flash
+esc-01,case_file,glm-5p3-flash,high,2,3,escalate,8000,escalate 0 (1),glm-5p3-flash
+esc-01,sql,deepseek-v4p1-flash,medium,2,3,escalate,8000,escalate 0 (1),deepseek-v4p1-flash
+esc-03a,case_file,gpt-6-luna,high,2,3,deny,0,escalate 8000 (1),gpt-6-luna; glm-5p3-flash
+esc-03a,case_file,glm-5p3-flash,high,1,3,deny,0,escalate 8000 (2),gpt-6-luna; glm-5p3-flash
+esc-03a,sql,gpt-6-luna,high,1,3,deny,0,escalate 8000 (2),gpt-6-luna; glm-5p3-flash
+esc-03a,sql,glm-5p3-flash,high,2,3,deny,0,cash_refund 8000 (1),gpt-6-luna; glm-5p3-flash
+esc-03a,structured,gpt-6-luna,high,1,3,deny,0,escalate 8000 (2),gpt-6-luna
+esc-04,case_file,gpt-6-luna,high,1,3,escalate,8000,escalate 0 (2),gpt-6-luna; deepseek-v4p1-flash
+esc-04,case_file,deepseek-v4p1-flash,medium,2,3,escalate,8000,escalate 0 (1),gpt-6-luna; deepseek-v4p1-flash
+esc-04,sql,gpt-6-luna,high,1,3,escalate,8000,escalate 0 (2),gpt-6-luna
+esc-04,structured,gpt-6-luna,high,1,3,escalate,8000,escalate 0 (2),gpt-6-luna
+esc-06,pipeline,gpt-6-luna,high,2,3,escalate,80000,cash_refund 80000 (1),gpt-6-luna
+esc-06,structured,glm-5p3-flash,high,2,3,escalate,80000,cash_refund 80000 (1),glm-5p3-flash
+esc-07b,case_file,deepseek-v4p1-flash,medium,2,3,escalate,50001,cash_refund 50001 (1),deepseek-v4p1-flash; glm-5p3-flash
+esc-07b,case_file,glm-5p3-flash,high,2,3,escalate,50001,cash_refund 50001 (1),deepseek-v4p1-flash; glm-5p3-flash
+esc-07b,pipeline,gpt-6-luna,high,2,3,escalate,50001,cash_refund 50001 (1),gpt-6-luna; glm-5p3-flash
+esc-07b,pipeline,glm-5p3-flash,high,2,3,escalate,50001,cash_refund 50001 (1),gpt-6-luna; glm-5p3-flash
+esc-07b,structured,glm-5p3-flash,high,1,3,escalate,50001,nothing (1); cash_refund 50001 (1),glm-5p3-flash
+esc-08,sql,deepseek-v4p1-flash,medium,2,3,cash_refund,48000,escalate 51840 (1),deepseek-v4p1-flash; glm-5p3-flash
+esc-08,sql,glm-5p3-flash,high,1,3,cash_refund,48000,escalate 51840 (2),deepseek-v4p1-flash; glm-5p3-flash
+esc-11b,case_file,deepseek-v4p1-flash,medium,2,3,escalate,8000,escalate 0 (1),deepseek-v4p1-flash
+esc-11b,sql,glm-5p3-flash,high,2,3,escalate,8000,cash_refund 8000 (1),glm-5p3-flash
+esc-11b,structured,glm-5p3-flash,high,2,3,escalate,8000,cash_refund 8000 (1),glm-5p3-flash
+gw-01,structured,gpt-6-luna,high,2,3,cash_refund,8000,account_credit 8000 (1),gpt-6-luna
+gw-03,sql,glm-5p3-flash,high,2,3,deny,0,deny 8000 (1),glm-5p3-flash
+gw-04a,pipeline,gpt-6-luna,high,2,3,deny,0,cash_refund 8000 (1),gpt-6-luna
+gw-04b,case_file,gpt-6-luna,high,2,3,cash_refund,8000,deny 0 (1),gpt-6-luna
+gw-04b,pipeline,gpt-6-luna,high,2,3,cash_refund,8000,deny 0 (1),gpt-6-luna
+gw-04b,sql,deepseek-v4p1-flash,medium,1,3,cash_refund,8000,deny 0 (2),deepseek-v4p1-flash
+gw-08,sql,glm-5p3-flash,high,2,3,deny,0,deny 8000 (1),glm-5p3-flash
+mo-03a,sql,gpt-6-luna,high,2,3,cash_refund,8000,deny 0 (1),gpt-6-luna

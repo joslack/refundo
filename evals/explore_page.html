@@ -1,0 +1,286 @@
+<title>Refundo Agent Results</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: an audit sheet in one column. The experiments table first, then the grid of cases with a wrong
+   answer, then the one case being read. Tables scroll sideways inside their own frame. */
+:root {
+  --bg: #f4f6f8; --surface: #ffffff; --ink: #16202b; --muted: #5b6978; --line: #d7dde4; --accent: #0b6e69;
+  --good: #1c7449; --good-bg: #e2f2e9; --part: #8f5a00; --part-bg: #fbeed3; --bad: #b0271f; --bad-bg: #fbe3e1;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f141a; --surface: #171e26; --ink: #e6eaef; --muted: #98a5b3; --line: #2a3440; --accent: #58c4bc;
+    --good: #72d19b; --good-bg: #16321f; --part: #e8b75a; --part-bg: #392d12; --bad: #f39088; --bad-bg: #3c1a18;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f141a; --surface: #171e26; --ink: #e6eaef; --muted: #98a5b3; --line: #2a3440; --accent: #58c4bc;
+  --good: #72d19b; --good-bg: #16321f; --part: #e8b75a; --part-bg: #392d12; --bad: #f39088; --bad-bg: #3c1a18;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.5; }
+.page { max-width: 1360px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; display: flex; flex-direction: column; gap: 36px; }
+h1 { font-size: 24px; font-weight: 600; margin: 0; text-wrap: balance; }
+h2 { font-size: 17px; font-weight: 600; margin: 0; text-wrap: balance; }
+h3 { font-size: 14px; font-weight: 600; margin: 0; }
+p { margin: 0; }
+a { color: var(--accent); }
+section, header { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.facts { color: var(--muted); font-family: var(--mono); font-size: 12.5px; }
+.notes { margin: 0; padding-left: 18px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; max-width: 80ch; }
+.banner { background: var(--part-bg); color: var(--part); border: 1px solid var(--part); border-radius: 4px; padding: 8px 12px; max-width: 80ch; }
+.legend { color: var(--muted); font-size: 12.5px; max-width: 95ch; }
+.scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 7px 9px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+th { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); background: var(--surface); white-space: normal; vertical-align: bottom; line-height: 1.3; }
+th button { all: unset; cursor: pointer; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
+th button:hover, th button[aria-sort] { color: var(--ink); }
+th button:focus-visible, .seg button:focus-visible, tr.pick:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+td.num, th.num { text-align: right; }
+td.num { font-family: var(--mono); font-size: 12.5px; }
+td.wrap { white-space: normal; min-width: 240px; max-width: 420px; }
+.code { font-family: var(--mono); font-size: 12.5px; }
+.sub { color: var(--muted); }
+tr.group td { border-top: 2px solid var(--line); }
+tr.partial td { color: var(--muted); }
+.bar { display: inline-block; width: 44px; height: 6px; background: var(--line); border-radius: 3px; vertical-align: middle; margin-right: 8px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--accent); }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; background: var(--surface); }
+.seg button { all: unset; cursor: pointer; padding: 5px 11px; font: inherit; font-size: 13px; color: var(--muted); border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.label { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-right: 6px; }
+.cell { display: inline-block; min-width: 34px; text-align: center; padding: 1px 6px; border-radius: 3px; font-family: var(--mono); font-size: 12.5px; }
+.cell.all { color: var(--muted); }
+.cell.some { background: var(--part-bg); color: var(--part); }
+.cell.none { background: var(--bad-bg); color: var(--bad); }
+tr.pick { cursor: pointer; }
+tr.pick:hover td, tr.pick[aria-selected="true"] td { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+#case { background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 18px 20px; gap: 16px; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tag { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 1px 6px; }
+.pair { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 4px 16px; max-width: 95ch; }
+.pair dt { color: var(--muted); }
+.pair dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+blockquote { margin: 0; padding-left: 12px; border-left: 3px solid var(--line); white-space: pre-wrap; }
+.model { display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); min-width: 0; }
+.trial { border: 1px solid var(--line); border-radius: 4px; background: var(--bg); min-width: 0; }
+.trial > summary { cursor: pointer; padding: 8px 12px; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; list-style: none; }
+.trial > summary::-webkit-details-marker { display: none; }
+.trial > summary::before { content: "+"; font-family: var(--mono); color: var(--muted); width: 10px; }
+.trial[open] > summary::before { content: "\2212"; }
+.trial .body { padding: 4px 12px 14px 34px; display: flex; flex-direction: column; gap: 10px; }
+.chip { font-size: 12px; padding: 1px 7px; border-radius: 3px; }
+.chip.ok { background: var(--good-bg); color: var(--good); }
+.chip.no { background: var(--bad-bg); color: var(--bad); }
+.chip.na { border: 1px solid var(--line); color: var(--muted); }
+.meta { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.text { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 90ch; }
+.calls { margin: 0; padding-left: 22px; font-family: var(--mono); font-size: 12px; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.inner > summary { cursor: pointer; color: var(--muted); }
+@media (max-width: 560px) {
+  .pair { grid-template-columns: 1fr; }
+  .trial .body { padding-left: 12px; }
+}
+@media (prefers-reduced-motion: no-preference) { tr.pick td { transition: background-color 80ms; } }
+</style>
+
+<div class="page">
+  <header>
+    <h1>Refund agent comparison</h1>
+    <p class="facts" id="facts"></p>
+    <p class="banner" id="banner" hidden></p>
+    <ul class="notes" id="notes"></ul>
+  </header>
+
+  <section>
+    <h2>Experiments</h2>
+    <div class="scroll"><table id="summary"></table></div>
+    <p class="legend">Right is the share of trials with the correct action and amount, with the number of right trials. The ± is the spread between the repeats. It counts only the cases that had different results in the repeats, so the true spread is larger. Three repeats cannot show a case that fails 1 time in 5. Do not rely on a difference of 1 or 2 points between two experiments. Cases are counted by how many of their repeats were right. Model seconds is the median time that a case spent in model calls, from the LangSmith traces. Agent seconds is the median time of the full agent run for a case. It includes the start of the agent process and the tool calls, and it changes with the load on the machine. Tokens are averages per case, with the cached part of the input in brackets. Cost is tokens at the provider's list price. Tool calls include the two a fixed graph makes in code. No proposal counts trials that ended with nothing submitted. Retried counts trials where a model call had to be sent again. Started is local time.</p>
+  </section>
+
+  <section>
+    <h2>Cases with a wrong answer</h2>
+    <div class="controls">
+      <div><span class="label">Agent</span><span class="seg" id="agents"></span></div>
+      <div><span class="label" id="shared-label">Missed by</span><span class="seg" id="shared"></span></div>
+    </div>
+    <p class="legend" id="miss-count"></p>
+    <div class="scroll"><table id="misses"></table></div>
+    <p class="legend">Each cell is how many of a case's repeats were right. Select a row to read the case below.</p>
+  </section>
+
+  <section id="case" hidden></section>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const D = JSON.parse(document.getElementById("data").textContent);
+const $ = (id) => document.getElementById(id);
+const el = (tag, attrs = {}, ...kids) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") node.className = v; else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v); else node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) node.append(kid);
+  return node;
+};
+const money = (cents) => "$" + (cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const answer = (a) => a ? `${a.action} · ${money(a.amount_cents || 0)} · §${(a.sections || []).join(", ") || "none"}` : "no proposal";
+const keep = (key, value) => { try { localStorage.setItem(key, value); } catch (e) {} };
+const kept = (key) => { try { return localStorage.getItem(key); } catch (e) { return null; } };
+
+const graphs = D.graphs, models = D.models;
+const exp = (g, m) => D.experiments.find((e) => e.graph === g && e.model === m);
+// trials[case][graph][model] -> list of trials
+const trials = {};
+for (const t of D.trials) (((trials[t.c] ??= {})[t.g] ??= {})[t.m] ??= []).push(t);
+const tally = (c, g, m) => { const ts = trials[c]?.[g]?.[m] || []; return { n: ts.length, right: ts.filter((t) => t.right).length }; };
+const missed = (c, g, m) => { const k = tally(c, g, m); return k.n > 0 && k.right < k.n; };
+
+// ---- header
+$("facts").textContent = `commit ${D.commit} · dataset ${D.dataset} · ${D.cases_count} cases × ${D.repeats} repeats · read ${D.generated}`;
+const complete = D.experiments.filter((e) => e.complete).length;
+if (complete < D.planned) { $("banner").hidden = false; $("banner").textContent = `The run is still going: ${complete} of ${D.planned} experiments are complete. Rows with "of ${D.cases_count * D.repeats}" in the Trials column are partial and will change.`; }
+for (const note of D.notes) $("notes").append(el("li", { text: note }));
+$("notes").hidden = !D.notes.length;
+
+// ---- experiments table
+const rightTrials = (e) => D.trials.filter((t) => t.g === e.graph && t.m === e.model && t.right).length;
+const columns = [
+  ["Agent", (e) => e.graph, (e) => el("td", { class: "code", text: e.graph })],
+  ["Model", (e) => e.model_name, (e) => el("td", {}, e.model_name, el("span", { class: "sub", text: " " + e.effort }))],
+  ["Right", (e) => e.reward, (e) => el("td", { class: "num" }, el("span", { class: "bar" }, el("i", { style: `width:${e.reward}%` })), `${e.reward.toFixed(1)}%`, el("span", { class: "sub", text: ` ${rightTrials(e)} of ${e.trials}` + (e.reward_sd === null ? "" : ` ±${e.reward_sd.toFixed(1)}`) })), "num"],
+  [`Cases right ${D.repeats} of ${D.repeats} · some · none`, (e) => e.always ?? -1, (e) => el("td", { class: "num", text: e.always === null ? "" : `${e.always} · ${e.sometimes} · ${e.never}` }), "num"],
+  ["Model seconds", (e) => e.model_seconds ?? 1e9, (e) => el("td", { class: "num", text: e.model_seconds === null || e.model_seconds === undefined ? "" : e.model_seconds.toFixed(1) }), "num"],
+  ["Agent seconds", (e) => e.seconds ?? 1e9, (e) => el("td", { class: "num", text: e.seconds === null ? "" : e.seconds.toFixed(1) }), "num"],
+  ["Cost", (e) => e.cost, (e) => el("td", { class: "num", text: "$" + e.cost.toFixed(4) }), "num"],
+  ["Input tokens (cached)", (e) => e.input, (e) => el("td", { class: "num" }, e.input.toLocaleString("en-US"), el("span", { class: "sub", text: ` (${e.cached.toLocaleString("en-US")})` })), "num"],
+  ["Output tokens", (e) => e.output, (e) => el("td", { class: "num", text: e.output.toLocaleString("en-US") }), "num"],
+  ["Model calls", (e) => e.model_calls, (e) => el("td", { class: "num", text: e.model_calls.toFixed(1) }), "num"],
+  ["Tool calls", (e) => e.tool_calls, (e) => el("td", { class: "num", text: e.tool_calls.toFixed(1) }), "num"],
+  ["No proposal", (e) => e.no_proposal, (e) => el("td", { class: "num", text: String(e.no_proposal) }), "num"],
+  ["Retried", (e) => e.retried, (e) => el("td", { class: "num", text: String(e.retried) }), "num"],
+  ["Started", (e) => e.started, (e) => el("td", { class: "num", text: e.started }), "num"],
+  ["Trials", (e) => e.trials, (e) => el("td", { class: "num", text: e.complete ? String(e.trials) : `${e.trials} of ${D.cases_count * D.repeats}` }), "num"],
+  ["", null, (e) => el("td", {}, e.url ? el("a", { href: e.url, target: "_blank", rel: "noopener", text: "LangSmith" }) : "")],
+];
+let order = { column: null, down: true };
+function drawSummary() {
+  const rows = [...D.experiments];
+  if (order.column !== null) { const key = columns[order.column][1]; rows.sort((a, b) => (key(a) > key(b) ? 1 : key(a) < key(b) ? -1 : 0) * (order.down ? -1 : 1)); }
+  const head = el("tr", {}, columns.map(([name, key, , kind], i) => el("th", { class: kind || "" }, key ? el("button", {
+    "aria-sort": order.column === i ? (order.down ? "descending" : "ascending") : null, text: name + (order.column === i ? (order.down ? " ↓" : " ↑") : ""),
+    onclick: () => { order = { column: i, down: order.column === i ? !order.down : true }; drawSummary(); } }) : name)));
+  const body = rows.map((e, i) => el("tr", { class: [order.column === null && i > 0 && rows[i - 1].graph !== e.graph ? "group" : "", e.complete ? "" : "partial"].join(" ").trim() || null }, columns.map((c) => c[2](e))));
+  $("summary").replaceChildren(el("thead", {}, head), el("tbody", {}, body));
+}
+drawSummary();
+
+// ---- misses
+const state = { agent: kept("agent") || graphs[0], shared: kept("shared") || "any", picked: null };
+if (![...graphs, "all"].includes(state.agent)) state.agent = graphs[0];
+// A link ending in #be-16 opens on that case.
+if (D.cases[location.hash.slice(1).toLowerCase()]) state.picked = location.hash.slice(1).toLowerCase();
+const short = (m) => D.model_names[m].split(" ")[0];
+function missRows() {
+  const out = [];
+  for (const c of Object.keys(D.cases)) {
+    if (state.agent === "all") {
+      const by = graphs.filter((g) => models.some((m) => missed(c, g, m)));
+      if (by.length) out.push({ c, by, total: graphs.reduce((n, g) => n + models.reduce((k, m) => k + (tally(c, g, m).n - tally(c, g, m).right), 0), 0) });
+    } else {
+      const by = models.filter((m) => missed(c, state.agent, m));
+      if (by.length) out.push({ c, by, total: models.reduce((k, m) => k + (tally(c, state.agent, m).n - tally(c, state.agent, m).right), 0) });
+    }
+  }
+  return out.sort((a, b) => b.by.length - a.by.length || b.total - a.total || a.c.localeCompare(b.c));
+}
+function sharedChoices(rows) {
+  const of = state.agent === "all" ? graphs.length : models.length, what = state.agent === "all" ? "agent" : "model";
+  const choices = [["any", "any", rows.length]];
+  for (let k = of; k >= 1; k--) choices.push([String(k), k === of ? `every ${what}` : k === 1 ? `one ${what} only` : `${k} ${what}s`, rows.filter((r) => r.by.length === k).length]);
+  return choices;
+}
+function cell(c, g, m) {
+  const k = tally(c, g, m);
+  if (!k.n) return el("td", { class: "num sub", text: "–" });
+  return el("td", { class: "num" }, el("span", { class: "cell " + (k.right === k.n ? "all" : k.right ? "some" : "none"), text: `${k.right}/${k.n}` }));
+}
+function drawMisses() {
+  $("agents").replaceChildren(...[...graphs, "all"].map((g) => el("button", { "aria-pressed": String(state.agent === g), text: g === "all" ? "all agents" : g,
+    onclick: () => { state.agent = g; state.shared = "any"; keep("agent", g); keep("shared", "any"); drawMisses(); drawCase(); } })));
+  const all = missRows(), choices = sharedChoices(all);
+  if (!choices.some((c) => c[0] === state.shared)) state.shared = "any";
+  $("shared-label").textContent = "Missed by";
+  $("shared").replaceChildren(...choices.map(([value, name, n]) => el("button", { "aria-pressed": String(state.shared === value), text: `${name} (${n})`,
+    onclick: () => { state.shared = value; keep("shared", value); drawMisses(); } })));
+  const rows = all.filter((r) => state.shared === "any" || String(r.by.length) === state.shared);
+  const scope = state.agent === "all" ? "any agent" : `agent ${state.agent}`;
+  $("miss-count").textContent = `${rows.length} of ${D.cases_count} cases shown: those where ${scope} gave a wrong answer in at least one repeat` + (state.shared === "any" ? "." : ", narrowed by the filter.");
+  const cols = state.agent === "all" ? graphs.flatMap((g) => models.map((m) => [g, m])) : models.map((m) => [state.agent, m]);
+  const head = [];
+  if (state.agent === "all") head.push(el("tr", {}, el("th", { colspan: "3" }), graphs.map((g) => el("th", { class: "num", colspan: String(models.length), text: g })), el("th", {})));
+  head.push(el("tr", {}, el("th", { text: "Case" }), el("th", { text: "Area" }), el("th", { text: "What it tests" }),
+    cols.map(([, m]) => el("th", { class: "num", text: state.agent === "all" ? short(m) : D.model_names[m] })), el("th", { text: "Missed by" })));
+  const body = rows.map((r) => {
+    const k = D.cases[r.c];
+    const who = state.agent === "all" ? r.by.join(", ") : r.by.map(short).join(", ");
+    return el("tr", { class: "pick", tabindex: "0", role: "button", "aria-selected": String(state.picked === r.c),
+      onclick: () => pick(r.c), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(r.c); } } },
+      el("td", { class: "code", text: k.id }), el("td", { class: "sub", text: k.area }), el("td", { class: "wrap", text: k.intent }),
+      cols.map(([g, m]) => cell(r.c, g, m)), el("td", { text: who }));
+  });
+  $("misses").replaceChildren(el("thead", {}, head), el("tbody", {}, body.length ? body : el("tr", {}, el("td", { colspan: String(cols.length + 4), class: "sub", text: "No case matches." }))));
+}
+function pick(c) {
+  state.picked = c;
+  try { history.replaceState(null, "", "#" + c); } catch (e) {}
+  drawMisses(); drawCase(); $("case").scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+// ---- one case
+function trialBlock(t) {
+  const mark = (ok, name) => el("span", { class: "chip " + (ok ? "ok" : "no"), text: `${name} ${ok ? "right" : "wrong"}` });
+  const given = t.p ? answer(t.p) : (t.err ? `no proposal (${t.err})` : "no proposal");
+  const summary = el("summary", {}, el("span", { class: "chip " + (t.right ? "ok" : "no"), text: t.right ? "right" : "wrong" }), el("span", { class: "code", text: given }),
+    el("span", { class: "meta", text: [t.secs === null ? null : `${t.secs.toFixed(1)} s`, `${t.mc} model calls`, `${t.tc} tool calls`, `$${t.cost.toFixed(4)}`].filter(Boolean).join(" · ") }));
+  const body = el("div", { class: "body" },
+    el("div", { class: "tags" }, t.p ? [mark(t.a, "action"), mark(t.am, "amount"), mark(t.s, "sections")] : el("span", { class: "chip na", text: "nothing was submitted" }),
+      t.err ? el("span", { class: "chip no", text: t.err }) : null, t.url ? el("a", { href: t.url, target: "_blank", rel: "noopener", text: "Open the trace in LangSmith" }) : null),
+    t.p?.rationale ? el("div", {}, el("h3", { text: "Rationale it submitted" }), el("p", { class: "text", text: t.p.rationale })) : null,
+    t.reply ? el("div", {}, el("h3", { text: "Reply to the customer" }), el("p", { class: "text", text: t.reply })) : null,
+    t.calls ? el("details", { class: "inner" }, el("summary", { text: `Tool calls in order (${t.calls.length})` }), el("ol", { class: "calls" }, t.calls.map((c) => el("li", { text: c })))) : null);
+  return el("details", { class: "trial", open: !t.right }, summary, body);
+}
+function drawCase() {
+  const box = $("case");
+  if (!state.picked) { box.hidden = true; return; }
+  const k = D.cases[state.picked];
+  const shown = state.agent === "all" ? graphs : [state.agent];
+  box.hidden = false;
+  box.replaceChildren(
+    el("div", { class: "tags" }, el("h2", { text: k.id }), el("span", { class: "tag", text: k.area }), el("span", { class: "tag", text: k.tier }), el("span", { class: "tag", text: k.hand_labeled ? "answer checked by hand" : "answer from the oracle only" })),
+    el("dl", { class: "pair" },
+      el("dt", { text: "What it tests" }), el("dd", { text: k.intent }),
+      el("dt", { text: "Customer wrote" }), el("dd", {}, el("blockquote", { text: k.message })),
+      el("dt", { text: "Expected" }), el("dd", { class: "code", text: answer(k.expected) }),
+      el("dt", { text: "Answer key's reason" }), el("dd", { class: "text", text: k.expected.rationale })),
+    ...shown.flatMap((g) => models.map((m) => {
+      const ts = (trials[state.picked]?.[g]?.[m] || []).slice().sort((a, b) => Number(a.right) - Number(b.right));
+      const e = exp(g, m);
+      return el("div", { class: "model" }, el("h3", {}, el("span", { class: "code", text: g }), ` · ${D.model_names[m]} ${e ? e.effort : ""} · `,
+        ts.length ? `${ts.filter((t) => t.right).length} of ${ts.length} right` : "not run yet"), ts.map(trialBlock));
+    })));
+}
+drawMisses();
+drawCase();
+</script>

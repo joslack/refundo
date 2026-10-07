@@ -71,7 +71,8 @@ def proposal(result) -> dict | None:
 
 
 def messages(result) -> list[dict]:
-    """The conversation the agent left behind: one "ai" message per model call, one "tool" message per tool call."""
+    """The conversation the agent left behind: one "tool" message per tool call, and one "ai" message per model
+    call, carrying that call's token usage. A reply that code wrote is an "ai" message with no usage."""
     try:
         return json.loads((trial_folder(result) / "agent/result.json").read_text())["messages"]
     except (OSError, ValueError, KeyError):
@@ -83,7 +84,8 @@ def measures(result) -> dict[str, float]:
     said = messages(result)
     out = {}
     if said:
-        out = {"tool_calls": sum(m.get("type") == "tool" for m in said), "model_calls": sum(m.get("type") == "ai" for m in said)}
+        out = {"tool_calls": sum(m.get("type") == "tool" for m in said),
+               "model_calls": sum(m.get("type") == "ai" and bool(m.get("usage_metadata")) for m in said)}
     ran = result.agent_execution
     if ran and ran.started_at and ran.finished_at:
         out["agent_seconds"] = round((ran.finished_at - ran.started_at).total_seconds(), 1)

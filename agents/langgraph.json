@@ -7,6 +7,8 @@
   ],
   "graphs": {
     "sql": "./sql_baseline.py:make_graph",
-    "structured": "./structured.py:make_graph"
+    "structured": "./structured.py:make_graph",
+    "case_file": "./case_file.py:make_graph",
+    "pipeline": "./pipeline.py:make_graph"
   }
 }
