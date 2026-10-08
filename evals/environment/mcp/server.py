@@ -10,7 +10,7 @@ workspace in the database, it has to.
 
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import asyncpg
@@ -18,6 +18,7 @@ from fastmcp import FastMCP
 
 mcp = FastMCP("quillstack")
 HIDDEN_TABLES = {"proposals"}
+ROW_LIMIT = 200  # rows one run_sql query returns
 Action = Literal["cash_refund", "account_credit", "deny", "escalate", "no_action"]
 
 
@@ -52,12 +53,23 @@ async def list_tables() -> dict[str, list[str]]:
 
 
 @mcp.tool
-async def run_sql(query: str) -> list[dict] | str:
-    """Run one read-only SQL query (PostgreSQL) against the records. Returns at most 200 rows."""
+async def run_sql(query: str) -> list[dict] | dict | str:
+    """Run one read-only SQL query (PostgreSQL) against the records.
+
+    A query returns at most 200 rows. A table can hold more than that, so a query that may match more has to be
+    read in pages, with ORDER BY and LIMIT 200 OFFSET 0, then OFFSET 200, and so on, or narrowed with WHERE, or
+    answered with COUNT, SUM or GROUP BY. When a query matches more than 200 rows, the result says so: it holds the
+    first 200 under "rows" and how many matched under "rows_matched".
+    """
     try:
-        return (await rows(query))[:200]
+        found = await rows(query)
     except asyncpg.PostgresError as e:
         return f"SQL error: {e}"
+    if len(found) <= ROW_LIMIT:
+        return found
+    return {"rows": found[:ROW_LIMIT], "rows_matched": len(found),
+            "incomplete": f"Only the first {ROW_LIMIT} of {len(found)} rows are here. Read the rest with ORDER BY, "
+                          f"LIMIT {ROW_LIMIT} and OFFSET, or narrow the query."}
 
 
 @mcp.tool
@@ -86,7 +98,29 @@ async def submit_proposal(action: Action, amount_cents: int, sections: list[str]
 
 
 def when(value: str) -> datetime:
-    return datetime.fromisoformat(value)
+    """A timestamp. One with no time zone, such as a bare date, is read as UTC, as every record is."""
+    at = datetime.fromisoformat(value)
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def narrowed(records: list[dict], at: str, since: str | None, until: str | None, limit: int) -> tuple[list[dict], dict]:
+    """The records dated from `since` to `until`, cut to the newest `limit` of them and kept in the order given,
+    with a count of what was left out, so the caller can tell that an account holds more than it was shown."""
+    matched = [r for r in records if (since is None or when(r[at]) >= when(since))
+               and (until is None or when(r[at]) <= when(until))]
+    newest = sorted(matched, key=lambda r: when(r[at]))[-limit:] if limit > 0 else []
+    kept = [r for r in matched if any(r is n for n in newest)]
+    return kept, {"returned": len(kept), "matched_but_older_than_these": len(matched) - len(kept),
+                  "on_the_account_in_all": len(records)}
+
+
+def bad_range(since: str | None, until: str | None) -> str | None:
+    """What to tell the caller if a timestamp cannot be read."""
+    try:
+        [when(value) for value in (since, until) if value]
+    except ValueError:
+        return "since and until must be timestamps such as 2026-03-01T00:00:00+00:00."
+    return None
 
 
 def parsed(value) -> dict:
@@ -191,15 +225,26 @@ async def get_requester() -> dict:
             "joined_at": member["joined_at"], "removed_at": member["removed_at"]}
 
 
+async def every_charge() -> list[dict]:
+    return charge_views(await rows("SELECT * FROM invoices"), await rows("SELECT * FROM invoice_lines"),
+                        await rows("SELECT * FROM refunds"), await rows("SELECT * FROM disputes"))
+
+
 @mcp.tool
-async def list_charges() -> list[dict]:
-    """Every charge on the account, newest first, each with the refunds and disputes against it.
+async def list_charges(since: str | None = None, until: str | None = None, limit: int = 36) -> dict | str:
+    """Charges on the account, newest first, each with the refunds and disputes against it.
+
+    With no arguments this returns the 36 newest. An account can hold years of charges: the counts beside the
+    charges say how many more there are. since and until are timestamps such as 2026-03-01T00:00:00+00:00 and
+    select by the time of the charge; limit is how many to return, the newest of those selected.
 
     amount_paid_cents is the policy's Amount Paid: what was charged after discounts and applied account credit,
     before tax. charged_to_card_cents includes tax. All amounts are in cents.
     """
-    return charge_views(await rows("SELECT * FROM invoices"), await rows("SELECT * FROM invoice_lines"),
-                        await rows("SELECT * FROM refunds"), await rows("SELECT * FROM disputes"))
+    if problem := bad_range(since, until):
+        return problem
+    charges, counts = narrowed(await every_charge(), "charged_at", since, until, limit)
+    return {"charges": charges} | counts
 
 
 @mcp.tool
@@ -243,9 +288,26 @@ async def get_usage(since: str, until: str | None = None) -> dict | str:
 
 
 @mcp.tool
-async def list_tickets() -> list[dict]:
-    """Every support ticket with its messages, oldest first. A message from a customer carries the role its
-    author held in the workspace when they wrote it."""
+async def list_tickets(since: str | None = None, until: str | None = None, search: str | None = None,
+                       limit: int = 10) -> dict | str:
+    """Support tickets with their messages, oldest first. A message from a customer carries the role its author
+    held in the workspace when they wrote it.
+
+    With no arguments this returns the 10 newest. An account can hold years of tickets: the counts beside the
+    tickets say how many more there are. since and until are timestamps such as 2026-03-01T00:00:00+00:00 and
+    select by when the ticket was opened. search keeps the tickets whose subject or messages contain that text,
+    in any letter case. limit is how many to return, the newest of those selected.
+    """
+    if problem := bad_range(since, until):
+        return problem
+    found = await every_ticket()
+    if search:
+        found = [t for t in found if search.lower() in " ".join([t["subject"], *(m["body"] for m in t["messages"])]).lower()]
+    tickets, counts = narrowed(found, "opened_at", since, until, limit)
+    return {"tickets": tickets} | counts
+
+
+async def every_ticket() -> list[dict]:
     members = {m["id"]: m for m in await rows("SELECT * FROM members")}
     changes = await rows("SELECT * FROM app_events WHERE type = 'member_role_changed'")
     messages = await rows("SELECT * FROM ticket_messages ORDER BY at")
@@ -259,9 +321,21 @@ async def list_tickets() -> list[dict]:
 
 
 @mcp.tool
-async def list_account_credits() -> list[dict]:
-    """Every change to the customer's account credit balance, oldest first. A negative amount is credit given to
-    the customer."""
+async def list_account_credits(since: str | None = None, until: str | None = None, limit: int = 24) -> dict | str:
+    """Changes to the customer's account credit balance, oldest first. A negative amount is credit given to the
+    customer.
+
+    With no arguments this returns the 24 newest; the counts beside them say how many more there are. since and
+    until are timestamps such as 2026-03-01T00:00:00+00:00; limit is how many to return, the newest of those
+    selected.
+    """
+    if problem := bad_range(since, until):
+        return problem
+    credits, counts = narrowed(await every_credit(), "at", since, until, limit)
+    return {"account_credits": credits} | counts
+
+
+async def every_credit() -> list[dict]:
     return [{"credit_id": c["id"], "amount_cents": c["amount"], "at": c["created"], "description": c["description"],
              "details": parsed(c["metadata"])} for c in await rows("SELECT * FROM credits ORDER BY created")]
 
@@ -297,9 +371,9 @@ async def get_case_file() -> dict:
         "request": request,
         "requester": await get_requester(),
         **await get_subscription(),
-        "charges": [charge | charge_timing(charge, events, request["received_at"]) for charge in await list_charges()],
-        "tickets": await list_tickets(),
-        "account_credits": await list_account_credits(),
+        "charges": [charge | charge_timing(charge, events, request["received_at"]) for charge in await every_charge()],
+        "tickets": await every_ticket(),
+        "account_credits": await every_credit(),
     }
 
 
