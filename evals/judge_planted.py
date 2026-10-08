@@ -1,7 +1,7 @@
 """Replies with a known fault, to see whether the judge's questions catch what they name.
 
-    uv run --with matplotlib --with "openai>=3.26" python evals/judge_planted.py <commit>                    # send nothing
-    uv run --with matplotlib --with "openai>=3.26" --env-file .env python evals/judge_planted.py <commit> --run
+    uv run --with matplotlib --with "langchain-openai>=1.7.0" python evals/judge_planted.py <commit>                    # send nothing
+    uv run --with matplotlib --with "langchain-openai>=1.7.0" --env-file .env python evals/judge_planted.py <commit> --run
 
 The trials of a run hold almost none of the faults the judge asks about, so they show how often a question is
 raised for nothing and not whether it is raised when it should be. Each example here is a pair on one real case: a
@@ -168,7 +168,8 @@ def report(lines: dict[str, judge.Answered]) -> None:
     """For each question: its probability on both halves of the pairs made for it, and its highest probability on
     every other request, where it should stay low."""
     names = list(dict.fromkeys(p.fault for p in PLANTED))
-    value = {(trial, a.name): a.probability for trial, line in lines.items() for a in line.answers or [] if a.type == "predicate"}
+    value = {(trial, name): a.probability for trial, line in lines.items() for name, a in (line.answers or {}).items()
+             if a.type == "predicate"}
     for name in names:
         print(f"\n{name}\n  {'case':9}{'with the fault':>15}{'without':>9}")
         for n, p in enumerate(PLANTED):
