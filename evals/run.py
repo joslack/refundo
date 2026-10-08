@@ -9,6 +9,7 @@
     uv run python evals/run.py sql,structured -m deepseek:medium,luna:high    two graphs, each model at one effort
     uv run python evals/run.py sql -m luna -k 5              each case five times, in the one experiment
     uv run python evals/run.py sql --dataset scratch         record in another LangSmith dataset, for a trial run
+    uv run python evals/run.py sql,structured --long         the accounts with years of history, in their own dataset
     uv run python evals/run.py sql -i an-07 -n 2             anything else goes to `harbor run`
 
 Each model and reasoning effort is its own Harbor job, recorded in LangSmith as its own experiment on the
@@ -40,6 +41,11 @@ JOBS = HERE / "jobs"
 # The name carries a version. Every experiment in a dataset is graded against one answer key and sees one
 # description of the submit tool, so a change to either gets a new name.
 DATASET = "quillstack-refund-requests-v2"
+# With --long: the tasks in evals/tasks-long, where each account has years of earlier history. They are other
+# cases under a policy with more rules, so they have a dataset of their own, and "-long" follows the commit in
+# a job's name so that results for a commit are read for one dataset at a time.
+LONG_DATASET = "quillstack-refund-requests-long-v1"
+TASKS = HERE / "tasks"
 FIREWORKS = "fireworks/accounts/fireworks/models/"
 # Short name -> (model id as Harbor expects it, the reasoning efforts the model accepts). Checked 2026-10-05.
 MODELS = {
@@ -98,7 +104,7 @@ def tools_of(graph: str, agents: Path) -> list[str]:
 
 def harbor(extra: list[str]) -> list[str]:
     concurrency = [] if "-n" in extra else ["-n", str(TRIALS_AT_ONCE)]
-    return ["harbor", "run", "-p", str(HERE / "tasks"), "-o", str(JOBS), "-y",
+    return ["harbor", "run", "-p", str(TASKS), "-o", str(JOBS), "-y",
             "--extra-docker-compose", str(HERE / "environment/docker-compose.yaml"), *concurrency]
 
 
@@ -126,7 +132,7 @@ def plugin_settings(**settings) -> list[str]:
 
 
 def agent_command(graph: str, model: str, effort: str | None, agents: Path, commit: str, extra: list[str],
-                  dataset: str = DATASET) -> list[str]:
+                  dataset: str = DATASET, tag: str = "") -> list[str]:
     short = model.split("/")[-1]
     stamp = datetime.now().strftime("%m%d-%H%M%S")
     model_kwargs = {"reasoning_effort": effort} | ({"timeout": REQUEST_TIMEOUT * SLOW[effort]} if effort in SLOW else {})
@@ -140,7 +146,7 @@ def agent_command(graph: str, model: str, effort: str | None, agents: Path, comm
         "--plugin", "evals.langsmith_plugin:Annotated", *plugin_settings(
             dataset_name=dataset, graph=graph, model=short, reasoning_effort=effort or "default", commit=commit,
             tools=tools_of(graph, agents), paced=bool(pace)),
-        "--job-name", f"{graph}-{short}-{effort or 'default'}-{commit}-{stamp}"] + extra
+        "--job-name", f"{graph}-{short}-{effort or 'default'}-{commit}{tag}-{stamp}"] + extra
 
 
 def env_file() -> dict[str, str]:
@@ -241,6 +247,10 @@ if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     graphs, extra = sys.argv[1].split(","), sys.argv[2:]
+    long = "--long" in extra
+    if long:
+        extra.remove("--long")
+        TASKS = HERE / "tasks-long"
     JOBS.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%m%d-%H%M%S")
     if graphs == ["oracle"]:
@@ -250,7 +260,7 @@ if __name__ == "__main__":
 
     chosen = take(extra, "-m") or DEFAULT_MODEL
     efforts = take(extra, "--efforts")
-    dataset = take(extra, "--dataset") or DATASET
+    dataset = take(extra, "--dataset") or (LONG_DATASET if long else DATASET)
     names = list(MODELS) if chosen == "all" else chosen.split(",")
     commit = git("rev-parse", "--short", "HEAD") + ("+" if git("status", "--porcelain") else "")
     agents = JOBS / "_agents" / f"{commit}-{stamp}"
@@ -263,7 +273,7 @@ if __name__ == "__main__":
         wanted = EFFORT_ORDER if efforts == "all" else efforts.split(",")
         plan = [(None if e == "default" else e, n) for e in wanted for n in names
                 if e == "default" or n not in MODELS or e in MODELS[n][1]]
-    commands = [(MODELS.get(n, (n,))[0], agent_command(graph, MODELS.get(n, (n,))[0], e, agents, commit, list(extra), dataset))
+    commands = [(MODELS.get(n, (n,))[0], agent_command(graph, MODELS.get(n, (n,))[0], e, agents, commit, list(extra), dataset, "-long" if long else ""))
                 for graph in graphs for e, n in plan]
     keys = env_file()
     wrong = {model: problem for model in dict.fromkeys(c[0] for c in commands) if (problem := unsound(model, keys))}

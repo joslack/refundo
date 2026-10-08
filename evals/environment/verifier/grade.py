@@ -11,9 +11,12 @@ from pathlib import Path
 
 from world.labeling import outcome_agrees, sections_agree, ui_action
 from world.oracle import label
+from world.history_scenarios import long_accounts
 from world.scenarios import ALL
 
-scenario = next(s for s in ALL if s.id == os.environ["SCENARIO_ID"])
+# A task built with long accounts says so, and is graded on the long account's own records.
+scenarios = long_accounts() if os.environ.get("LONG_ACCOUNTS") == "1" else ALL
+scenario = next(s for s in scenarios if s.id == os.environ["SCENARIO_ID"])
 oracle = label(scenario.world, scenario.request)
 owed = oracle.proposed.amount_cents if oracle.proposed else oracle.amount_cents
 
