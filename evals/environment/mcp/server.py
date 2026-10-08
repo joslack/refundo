@@ -19,6 +19,7 @@ from fastmcp import FastMCP
 mcp = FastMCP("quillstack")
 HIDDEN_TABLES = {"proposals"}
 ROW_LIMIT = 200  # rows one run_sql query returns
+RESULT_BUDGET = 8_000  # characters one run_sql result holds; a larger one is refused, not cut
 Action = Literal["cash_refund", "account_credit", "deny", "escalate", "no_action"]
 
 
@@ -41,35 +42,51 @@ async def get_request_context() -> dict:
 
 
 @mcp.tool
-async def list_tables() -> dict[str, list[str]]:
-    """The tables you can query with run_sql, and the columns of each."""
+async def list_tables() -> dict[str, dict]:
+    """The tables you can query with run_sql: how many rows each holds, and its columns."""
     columns = await rows("SELECT table_name, column_name || ' ' || data_type AS col FROM information_schema.columns "
                          "WHERE table_schema = 'public' ORDER BY table_name, ordinal_position")
-    out: dict[str, list[str]] = {}
+    out: dict[str, dict] = {}
     for c in columns:
         if c["table_name"] not in HIDDEN_TABLES:
-            out.setdefault(c["table_name"], []).append(c["col"])
+            out.setdefault(c["table_name"], {"rows": 0, "columns": []})["columns"].append(c["col"])
+    for table in out:  # the names come from the database's own catalog
+        out[table]["rows"] = (await rows(f'SELECT count(*) AS n FROM "{table}"'))[0]["n"]
     return out
+
+
+def sql_result(found: list[dict]) -> list[dict] | dict:
+    """What run_sql returns for the rows a query matched: the rows; or the first ROW_LIMIT with a note that there
+    are more; or, when that is more text than RESULT_BUDGET, no rows and the size of what was asked for."""
+    shown = found[:ROW_LIMIT]
+    size = len(json.dumps(shown))
+    if size > RESULT_BUDGET:
+        return {"too_large": f"This query returns {len(found)} rows and about {size:,} characters, and a result can hold "
+                             f"{RESULT_BUDGET:,}. No rows were returned. Ask for less: narrow it with WHERE, name only the "
+                             "columns you need, answer with COUNT, SUM or GROUP BY, or read it in pages with ORDER BY, "
+                             "LIMIT and OFFSET.",
+                "rows_matched": len(found), "characters": size}
+    if len(found) <= ROW_LIMIT:
+        return found
+    return {"rows": shown, "rows_matched": len(found),
+            "incomplete": f"Only the first {ROW_LIMIT} of {len(found)} rows are here. Read the rest with ORDER BY, "
+                          f"LIMIT {ROW_LIMIT} and OFFSET, or narrow the query."}
 
 
 @mcp.tool
 async def run_sql(query: str) -> list[dict] | dict | str:
     """Run one read-only SQL query (PostgreSQL) against the records.
 
-    A query returns at most 200 rows. A table can hold more than that, so a query that may match more has to be
-    read in pages, with ORDER BY and LIMIT 200 OFFSET 0, then OFFSET 200, and so on, or narrowed with WHERE, or
-    answered with COUNT, SUM or GROUP BY. When a query matches more than 200 rows, the result says so: it holds the
-    first 200 under "rows" and how many matched under "rows_matched".
+    A result can hold 8,000 characters and 200 rows. list_tables says how many rows each table has, and a table can
+    hold years of records, so ask for what the question needs: narrow with WHERE, name the columns, answer with
+    COUNT, SUM or GROUP BY, or read in pages with ORDER BY, LIMIT and OFFSET. A query that returns more than 8,000
+    characters gets no rows back, only how many rows and characters it matched under "too_large". A query that
+    matches more than 200 rows within that size gets the first 200 under "rows" and the count under "rows_matched".
     """
     try:
-        found = await rows(query)
+        return sql_result(await rows(query))
     except asyncpg.PostgresError as e:
         return f"SQL error: {e}"
-    if len(found) <= ROW_LIMIT:
-        return found
-    return {"rows": found[:ROW_LIMIT], "rows_matched": len(found),
-            "incomplete": f"Only the first {ROW_LIMIT} of {len(found)} rows are here. Read the rest with ORDER BY, "
-                          f"LIMIT {ROW_LIMIT} and OFFSET, or narrow the query."}
 
 
 @mcp.tool

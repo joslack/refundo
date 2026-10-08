@@ -25,12 +25,21 @@ async def main() -> None:
     scenario = next(s for s in scenarios if s.id == os.environ["SCENARIO_ID"])
     async with Client("http://mcp:8000/mcp") as mcp:
         async def every_row(table: str) -> list[dict]:
-            """The whole table, read 200 rows at a time: run_sql returns no more than that for one query."""
+            """The whole table, read a page at a time. run_sql returns no rows for a result over its size, so a page
+            that is refused is asked for again at half the length."""
             found: list[dict] = []
-            while len(page := (await mcp.call_tool(
-                    "run_sql", {"query": f"SELECT * FROM {table} ORDER BY ctid LIMIT 200 OFFSET {len(found)}"})).data) == 200:
+            size = 64
+            while True:
+                query = f"SELECT * FROM {table} ORDER BY ctid LIMIT {size} OFFSET {len(found)}"
+                page = (await mcp.call_tool("run_sql", {"query": query})).data
+                if isinstance(page, dict):  # too large
+                    size //= 2
+                    if not size:
+                        raise RuntimeError(f"One row of {table} is larger than a result can hold.")
+                    continue
                 found += page
-            return found + page
+                if len(page) < size:
+                    return found
 
         tables = (await mcp.call_tool("list_tables", {})).data
         rows = {t: await every_row(t) for t in tables}

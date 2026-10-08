@@ -94,6 +94,18 @@ def test_a_short_account_is_returned_whole_by_default(scenario):
     assert len(scenario.world.invoices) <= 36 and len(scenario.world.tickets) <= 10 and len(scenario.world.credits) <= 24
 
 
+def test_a_sql_result_over_its_size_returns_no_rows_and_says_how_much_was_asked_for():
+    charges = charges_of(LONG[ALL[0].id])
+    refused = server.sql_result(charges)
+    assert set(refused) == {"too_large", "rows_matched", "characters"}
+    assert refused["rows_matched"] == len(charges) and refused["characters"] > server.RESULT_BUDGET
+    few = [{"id": c["invoice_id"], "paid": c["amount_paid_cents"]} for c in charges]
+    assert server.sql_result(few) == few  # the same rows with two columns fit
+    many = [{"n": n} for n in range(server.ROW_LIMIT + 50)]
+    cut = server.sql_result(many)
+    assert cut["rows"] == many[:server.ROW_LIMIT] and cut["rows_matched"] == len(many)
+
+
 def test_the_history_is_the_same_every_time():
     assert with_history(ALL[0]).world == with_history(ALL[0]).world
 
