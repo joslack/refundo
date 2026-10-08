@@ -44,7 +44,7 @@ DATASET = "quillstack-refund-requests-v2"
 # With --long: the tasks in evals/tasks-long, where each account has years of earlier history. They are other
 # cases under a policy with more rules, so they have a dataset of their own, and "-long" follows the commit in
 # a job's name so that results for a commit are read for one dataset at a time.
-LONG_DATASET = "quillstack-refund-requests-long-v1"
+LONG_DATASET = "quillstack-refunds-hard"
 TASKS = HERE / "tasks"
 FIREWORKS = "fireworks/accounts/fireworks/models/"
 # Short name -> (model id as Harbor expects it, the reasoning efforts the model accepts). Checked 2026-10-05.
