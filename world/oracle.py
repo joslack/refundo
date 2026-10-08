@@ -49,11 +49,16 @@ class Facts(BaseModel):
     cancel_completed_at: list[datetime] = []  # one per system that recorded a completed cancellation
     overcharge: int = 0
     undercharged: bool = False  # billed for fewer Seats than the settings; not a Billing Error
-    written_promise: int | None = None
+    written_promise: int | None = None  # a promise that belongs to this charge
     promise_paid: int = 0  # refunds issued since the promise was written
+    promise_at: datetime | None = None  # the 90 days for a promise run from here
+    error_last_at: datetime | None = None  # the most recent charge with the same Billing Error, when it repeats
+    # §6
+    first_purchase_refunded_before: bool = False  # the Workspace took the first-purchase refund on an earlier annual term
     # §9
     consecutive_paid_months: int = 0
     goodwill_in_last_365_days: bool = False
+    goodwill_refunds_ever: int = 0
     is_most_recent_charge: bool = True
     on_monthly_plan: bool = True  # the Workspace's plan at the Request Time
     support: dict[str, list[str]] = {}  # fact name -> ids of the records behind it
@@ -171,13 +176,17 @@ def extract_facts(world: World, request: Request) -> Facts:
         extra = line.amount * (line.seats - settings.seats) // line.seats
         overcharge = extra * (inv.subtotal - inv.discount) // inv.subtotal
 
-    # Written promise by a support representative, in a ticket. Only a refund recorded against that
-    # ticket counts as paying it; a refund issued for some other reason does not.
-    promise, promise_paid = None, 0
+    # Written promise by a support representative, in a ticket. It belongs to the charge it names or, if it
+    # names none, to the most recent paid charge before it. Only a refund recorded against that ticket counts
+    # as paying it; a refund issued for some other reason does not.
+    promise, promise_paid, promise_at = None, 0, None
     for t in world.tickets:
         for m in t.messages:
             if m.author_type == "support_agent" and "promise_cents" in m.truth and m.at <= now:
-                promise = m.truth["promise_cents"]
+                before = [i for i in world.invoices if i.status == "paid" and i.created <= m.at]
+                if (m.truth.get("invoice") or (max(before, key=lambda i: i.created).id if before else None)) != inv.id:
+                    continue
+                promise, promise_at = m.truth["promise_cents"], m.at
                 support["promise"] = [t.id]
                 paid = [r for r in world.refunds if r.metadata.get("quillstack_ticket") == t.id and r.created <= now]
                 promise_paid = sum(r.amount for r in paid)
@@ -204,6 +213,13 @@ def extract_facts(world: World, request: Request) -> Facts:
         and timedelta(0) <= now - r.created <= timedelta(days=365)
     ]
     goodwill_recent = bool(support["goodwill_refunds"])
+    support["goodwill_refunds_ever"] = [r.id for r in world.refunds
+                                        if r.metadata.get("quillstack_basis") == "goodwill" and r.created <= now]
+    # A first-purchase refund on an earlier annual term (§6): the rule is available once per Workspace.
+    earlier_first = {i.charge_id for i in world.invoices if i.lines[0].interval is Interval.YEAR and i.charge_id
+                     and i.billing_reason != "subscription_cycle" and i.created < inv.created}
+    support["first_purchase_refunds"] = [r.id for r in world.refunds if r.charge_id in earlier_first and r.created <= now
+                                         and r.metadata.get("quillstack_basis") == "first_purchase"]
     is_latest = not any(
         i.created > inv.created and i.created <= now and i.status == "paid"
         and i.billing_reason == "subscription_cycle" for i in world.invoices
@@ -218,8 +234,10 @@ def extract_facts(world: World, request: Request) -> Facts:
         mentions_legal=request.mentions_legal, reports_offrecord_promise=request.reports_offrecord_promise, usage_since_charge=usage_since, usage_days_in_period=usage_days,
         duplicate_of=duplicate_of, cancel_requested_at=min(requested, default=None),
         cancel_completed_at=completed, overcharge=overcharge, undercharged=line.seats < settings.seats,
-        written_promise=promise, promise_paid=promise_paid,
+        written_promise=promise, promise_paid=promise_paid, promise_at=promise_at,
+        first_purchase_refunded_before=bool(support["first_purchase_refunds"]),
         consecutive_paid_months=consecutive, goodwill_in_last_365_days=goodwill_recent,
+        goodwill_refunds_ever=len(support["goodwill_refunds_ever"]),
         is_most_recent_charge=is_latest, support=support,
     )
 
@@ -295,7 +313,10 @@ def decide(f: Facts) -> Outcome:
     if f.reports_offrecord_promise:
         reasons.append("the customer reports a promise made outside a ticket, which the records can't confirm or rule out")
         c.add("The customer reports a promise made outside a support ticket.", records=["request"])
-    if proposal.section.startswith("4") and proposal.action is not Action.DENY and not _within(f, 90):
+    # The 90 days run from the charge; from the promise, for a written promise; and from the most recent
+    # affected charge, for an error that repeats.
+    reported_from = f.promise_at if proposal.section == "4.4" else max(f.charged_at, f.error_last_at or f.charged_at)
+    if proposal.section.startswith("4") and proposal.action is not Action.DENY and f.now - reported_from > timedelta(days=90):
         reasons.append("a Billing Error was reported more than 90 days after the charge")
     if proposal.amount_cents > ESCALATION_CAP_CENTS:
         reasons.append("the amount is over $500")
@@ -364,7 +385,9 @@ def _propose(f: Facts, cancelled_at: datetime | None, c: _Claims) -> Outcome:
         return _goodwill(f, owed, c)
 
     c.consider("6")
-    if f.kind == "annual_first":
+    if f.kind == "annual_first" and f.first_purchase_refunded_before:
+        c.add("The Workspace received the first-purchase refund on an earlier annual term.", "first_purchase_refunds")
+    elif f.kind == "annual_first":
         if not _within(f, 30):
             return _out(c, Action.DENY, 0, "6", "First annual purchase, more than 30 days ago.")
         if not usage():
@@ -374,7 +397,8 @@ def _propose(f: Facts, cancelled_at: datetime | None, c: _Claims) -> Outcome:
         return _cash(c, f.amount_paid * (f.period_days - d) // f.period_days, "6",
                      f"First annual purchase with Usage: prorated, {d} of {f.period_days} days elapsed.")
 
-    c.add("The charge continues an annual term that was already running.", records=[f.invoice_id])
+    else:
+        c.add("The charge continues an annual term that was already running.", records=[f.invoice_id])
     if not _within(f, 14):
         return _out(c, Action.DENY, 0, "6", "Annual renewal, more than 14 days ago.")
     if not usage():
@@ -392,7 +416,10 @@ def _goodwill(f: Facts, owed: int, c: _Claims) -> Outcome:
     # When goodwill is denied, only the conditions that failed decide it; the ones that passed are rule-outs.
     months_ok, usage_ok = f.consecutive_paid_months >= 6, f.usage_days_in_period <= 10
     denied = not (months_ok and usage_ok and not f.goodwill_in_last_365_days and _within(f, 30)
-                  and f.is_most_recent_charge and f.on_monthly_plan)
+                  and f.is_most_recent_charge and f.on_monthly_plan and f.goodwill_refunds_ever < 3)
+    if f.goodwill_refunds_ever >= 3:
+        c.add(f"The Workspace has received {f.goodwill_refunds_ever} Goodwill Refunds since it was created.",
+              "goodwill_refunds_ever")
     c.add(f"The Workspace has {f.consecutive_paid_months} consecutive paid monthly charges.", records=["source:invoices"],
           rule_out=denied and months_ok)
     if f.goodwill_in_last_365_days:
@@ -404,6 +431,7 @@ def _goodwill(f: Facts, owed: int, c: _Claims) -> Outcome:
     failed = [name for name, ok in {
         "fewer than 6 consecutive paid months": f.consecutive_paid_months >= 6,
         "a goodwill refund in the last 365 days": not f.goodwill_in_last_365_days,
+        "three Goodwill Refunds already": f.goodwill_refunds_ever < 3,
         "the Workspace is no longer on a monthly plan": f.on_monthly_plan,
         "more than 30 days since the charge": _within(f, 30),
         "Usage on more than 10 days": f.usage_days_in_period <= 10,
@@ -438,17 +466,72 @@ def _out(c: _Claims, action: Action, amount: int, section: str, why: str) -> Out
                    records=_flatten(c), evidence=list(c.items), considered=list(c.sections))
 
 
+def _billing_error(outcome: Outcome) -> str | None:
+    """The Billing Error case a charge is refunded under: "4.1", "4.2" or "4.3". A written promise (4.4) is
+    one commitment, not an error that a later charge can repeat."""
+    found = outcome.proposed if outcome.action is Action.ESCALATE and outcome.proposed else outcome
+    granted = found.action in (Action.REFUND, Action.PARTIAL_REFUND)
+    return found.section if granted and found.section in {"4.1", "4.2", "4.3"} else None
+
+
+def _repeated_error(world: World, request: Request, primary: Outcome) -> dict[str, datetime]:
+    """The charges that carry the same Billing Error as the charge in question, on consecutive Billing Periods:
+    each one's invoice id and when it was charged. Empty unless the error is on more than one Billing Period."""
+    kind = _billing_error(primary)
+    paid = [i for i in world.invoices if i.status == "paid" and i.created <= request.received_at]
+    mine = next((i for i in paid if i.id == request.invoice_id), None)
+    if kind is None or mine is None:
+        return {}
+    periods: dict[datetime, tuple[datetime, list[Invoice]]] = {}
+    for i in paid:
+        periods.setdefault(i.period_start, (i.period_end, []))[1].append(i)
+    before = {end: start for start, (end, _) in periods.items()}  # the Billing Period that ends where one starts
+
+    def same_error(invoice: Invoice) -> bool:
+        about_it = request.model_copy(update={"invoice_id": invoice.id})
+        return _billing_error(decide(extract_facts(world, about_it))) == kind
+
+    affected, spans = {mine.id: mine.created}, 1
+    for following in (False, True):
+        start = mine.period_start
+        while (start := periods[start][0] if following else before.get(start)) in periods:
+            hits = [i for i in periods[start][1] if same_error(i)]
+            if not hits:
+                break
+            affected |= {i.id: i.created for i in hits}
+            spans += 1
+    return affected if spans > 1 else {}
+
+
 def label(world: World, request: Request) -> Outcome:
-    """Decide the request. Each charge it describes is decided separately (§4), then the amounts are added."""
+    """Decide the request. Each charge it describes is decided separately (§4), then the amounts are added.
+
+    A Billing Error that repeats on consecutive charges is one error (§4): the request then covers every
+    affected charge of the last 365 days, and the 90 days run from the most recent of them.
+    """
     primary = decide(extract_facts(world, request))
-    if not request.also_invoice_ids or primary.action is Action.NO_ACTION:
+    if primary.action is Action.NO_ACTION:
         return primary
-    outs = [primary] + [decide(extract_facts(world, request.model_copy(update={"invoice_id": i})))
-                        for i in request.also_invoice_ids]
+    repeated = _repeated_error(world, request, primary)
+    last = max(repeated.values(), default=None)
+
+    def one(invoice_id: str) -> Outcome:
+        facts = extract_facts(world, request.model_copy(update={"invoice_id": invoice_id}))
+        return decide(facts.model_copy(update={"error_last_at": last}) if invoice_id in repeated else facts)
+
+    too_old = {i for i, at in repeated.items() if request.received_at - at > timedelta(days=365)}
+    ids = list(dict.fromkeys([request.invoice_id, *request.also_invoice_ids, *(i for i in repeated if i not in too_old)]))
+    if len(ids) == 1 and not repeated:
+        return primary
+    outs = [one(i) for i in ids]
+    primary = outs[0]
     grants = (Action.REFUND, Action.PARTIAL_REFUND, Action.CREDIT)
-    owed = [o.proposed if o.action is Action.ESCALATE else o for o in outs]
+    owed = [o.proposed if o.action is Action.ESCALATE else o for o, i in zip(outs, ids) if i not in too_old]
     total = sum(o.amount_cents for o in owed if o and o.action in grants)
     merged = primary.model_copy(deep=True)
+    if repeated:
+        merged.rationale = f"The same Billing Error is on {len(repeated)} consecutive charges. " + merged.rationale
+        outs[0] = merged
     for o in outs[1:]:
         merged.considered += [s for s in o.considered if s not in merged.considered]
         merged.must_cite += [s for s in o.must_cite if s not in merged.must_cite]

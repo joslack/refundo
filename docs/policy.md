@@ -44,9 +44,11 @@ A Billing Error is refunded in cash, regardless of Usage, plan type, or the time
 1. **Duplicate charge** for the same Billing Period. Refund the duplicate, not the original.
 2. **Charge after a Confirmed Cancellation,** meaning a Renewal Timestamp later than the cancellation. Refund the full charge, even if the Workspace had Usage afterward.
 3. **Wrong Seat count** compared with the Workspace settings at the Renewal Timestamp, where the charge was higher than it should have been. Refund only the difference. An undercharge is not a Billing Error.
-4. **Refund promised in writing** by a Quillstack support representative in a support ticket. Refund the promised amount. A promise the customer reports that does not appear in a ticket is not a Billing Error. If they say it was made outside a ticket, such as by phone, escalate under Section 11.
+4. **Refund promised in writing** by a Quillstack support representative in a support ticket. The promise stands until it is paid, however old the ticket. Refund the promised amount, less anything already refunded against that ticket. The promise belongs to the charge it names or, if it names none, to the most recent paid charge before it, and for this case the 90 days run from the date of the promise. A promise the customer reports that does not appear in a ticket is not a Billing Error. If they say it was made outside a ticket, such as by phone, escalate under Section 11.
 
 Forgetting to cancel, not knowing the plan renews automatically, and not using the product are not Billing Errors. Billing Error refunds do not count toward the goodwill limit in Section 9. If one charge fits more than one case above, apply the first case that fits. When a request describes more than one charge, decide each charge separately.
+
+**Repeated error.** When the same Billing Error occurs on consecutive charges, treat it as one error. If the request is made within 90 days of the most recent affected charge, refund every affected charge made in the 365 days before the Request Time. Affected charges older than that are not refunded.
 
 ## 5. Monthly plans
 
@@ -67,6 +69,8 @@ Annual plans treat a first purchase and a renewal differently. A renewal is a ch
 - Within 30 days, with Usage: prorated cash refund for the days remaining in the Billing Period (Section 10).
 - After 30 days: no refund.
 
+The first-purchase refund is available once per Workspace. If the Workspace received a refund under this rule for an earlier annual term, treat a later first purchase as an annual renewal.
+
 **Annual renewal:**
 
 - Within 14 days of the Renewal Timestamp, with no Usage since: full cash refund.
@@ -82,6 +86,7 @@ A Goodwill Refund applies only when no earlier section grants a refund, and only
 - the Workspace is on a monthly plan;
 - the Workspace has at least 6 consecutive successful monthly charges, counting the charge being refunded;
 - no Goodwill Refund was issued to the Workspace in the previous 365 days (Billing Error refunds do not count);
+- the Workspace has received fewer than three Goodwill Refunds since it was created;
 - the request is made within 30 days of the charge; and
 - the Workspace had Usage on 10 or fewer distinct UTC calendar days in the Billing Period being refunded.
 
