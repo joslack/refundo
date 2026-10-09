@@ -1,6 +1,7 @@
 """Cost against reward for every experiment of one sweep, as tables and charts.
 
     uv run --with matplotlib python evals/pareto.py <commit>
+    uv run --with matplotlib python evals/pareto.py <commit>-long     the jobs of evals/run.py --long
 
 Reads the Harbor job folders in evals/jobs/ whose names carry the given commit (the one evals/run.py put in
 each job's name) and writes, to evals/results/<commit>/:
@@ -47,11 +48,15 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from world.labeling import LABELS, load_labels, ui_action  # noqa: E402
 from world.oracle import label  # noqa: E402
+from world.history_scenarios import long_accounts  # noqa: E402
 from world.scenarios import ALL  # noqa: E402
 
 JOBS = ROOT / "evals/jobs"
 OUT = ROOT / "evals/results"
-CASES = 80
+# The cases an experiment is read against. A commit given with "-long" after it, as evals/run.py --long names its
+# jobs, is read against the accounts with years of history; the lines at the foot of this file set that.
+SCENARIOS = ALL
+CASES = len(SCENARIOS)
 HAND_LABELED = {k.lower() for k in load_labels(LABELS / "jonah.jsonl")}
 EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"]
 HALO = [withStroke(linewidth=2.5, foreground="white")]  # keeps a label readable where it crosses a line
@@ -93,10 +98,11 @@ AA_NEAREST = {("deepseek-v4p1-flash", "high"): 39.46, ("glm-5p3-flash", "high"):
 UNRELIABLE = {"nemotron-lightning-3p5-30b-a3b"}
 NAMES = {"gpt-6-luna": "GPT-6 Luna", "gpt-5.6-luna": "GPT-5.6 Luna", "gpt-5.4-mini": "GPT-5.4 mini",
          "gpt-5.4-nano": "GPT-5.4 nano", "deepseek-v4p1-flash": "DeepSeek V4.1 Flash", "glm-5p3-flash": "GLM-5.3 Flash",
-         "nemotron-lightning-3p5-30b-a3b": "Nemotron Lightning 3.5", "gpt-oss-120b": "gpt-oss-120b"}
+         "nemotron-lightning-3p5-30b-a3b": "Nemotron Lightning 3.5", "gpt-oss-120b": "gpt-oss-120b",
+         "claude-haiku-5-5": "Claude Haiku 5.5"}
 COLORS = {"gpt-6-luna": "#111111", "gpt-5.6-luna": "#6b6b6b", "gpt-5.4-mini": "#c2410c", "gpt-5.4-nano": "#e0a100",
           "deepseek-v4p1-flash": "#3b3bd6", "glm-5p3-flash": "#2d7ff9", "nemotron-lightning-3p5-30b-a3b": "#3f9142",
-          "gpt-oss-120b": "#a23b72"}
+          "gpt-oss-120b": "#a23b72", "claude-haiku-5-5": "#d97757"}
 
 
 def read_json(path: Path, default=None):
@@ -414,7 +420,7 @@ def in_order(rows: list[dict]) -> list[dict]:
 def misses(rows: list[dict]) -> list[dict]:
     """One row per case and experiment where a trial was wrong, with the oracle's answer and what was given."""
     expected = {}
-    for scenario in ALL:
+    for scenario in SCENARIOS:
         oracle = label(scenario.world, scenario.request)
         owed = oracle.proposed.amount_cents if oracle.proposed else oracle.amount_cents
         expected[scenario.id.lower()] = (ui_action(oracle.action.value), owed or 0)
@@ -475,6 +481,9 @@ def write_csv(rows: list[dict], folder: Path) -> None:
 
 
 if __name__ == "__main__":
+    if sys.argv[1].endswith("-long"):
+        SCENARIOS = long_accounts()
+        CASES = len(SCENARIOS)
     rows = experiments(sys.argv[1])
     out = OUT / sys.argv[1]
     out.mkdir(parents=True, exist_ok=True)
