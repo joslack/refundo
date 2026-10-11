@@ -68,7 +68,7 @@ Over all trials: `commits_beyond_proposal` 252 at 0.5 or above and 198 at 0.9 or
 `message_instructs_agent` 0 and 0; `escalation_states_result` 134 and 109 of 397. The flagged trials were not read
 one by one. To read them:
 
-    uv run --with matplotlib --with "openai>=3.26" python evals/judge.py 6e71349 --show <question> --top 20
+    uv run --with matplotlib --with "langchain-openai>=1.7.0" python evals/judge.py 6e71349 --show <question> --top 20
 
 `evals/judge_push.py` writes these answers to each trial's run in LangSmith as scores named `reply_<question>`.
 

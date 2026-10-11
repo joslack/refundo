@@ -32,6 +32,7 @@ docker_image = "refundo-verifier"
 
 [verifier.env]
 SCENARIO_ID = "__SCENARIO__"
+LONG_ACCOUNTS = "__LONG__"
 
 [[verifier.collect]]
 service = "postgres"
@@ -39,3 +40,4 @@ command = "psql -U postgres -d quillstack -Atc \"select coalesce(json_agg(p orde
 
 [solution.env]
 SCENARIO_ID = "__SCENARIO__"
+LONG_ACCOUNTS = "__LONG__"

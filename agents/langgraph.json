@@ -2,6 +2,7 @@
   "dependencies": [
     "langchain>=1.4",
     "langchain-openai",
+    "langchain-anthropic",
     "langchain-fireworks",
     "langchain-mcp-adapters"
   ],

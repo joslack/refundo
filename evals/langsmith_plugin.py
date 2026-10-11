@@ -38,9 +38,12 @@ from harbor_langsmith.plugin import LangSmithPlugin
 
 from world.labeling import LABELS, load_labels, ui_action
 from world.oracle import label
+from world.history_scenarios import HISTORY
 from world.scenarios import ALL
 
-SCENARIOS = {s.id.lower(): s for s in ALL}  # a task is named after its scenario, as in "mo-01"
+# A task is named after its scenario, as in "mo-01". A catalog scenario has the same answer on a long account,
+# so its entry serves both datasets.
+SCENARIOS = {s.id.lower(): s for s in [*ALL, *HISTORY]}
 HAND_LABELED = set(load_labels(LABELS / "jonah.jsonl"))
 
 

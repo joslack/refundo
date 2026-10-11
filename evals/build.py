@@ -31,6 +31,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from world.history_scenarios import long_accounts
 from world.scenarios import ALL
 from world.sql import seed_sql
 
@@ -38,6 +39,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 ENVIRONMENT = HERE / "environment"
 TASKS = HERE / "tasks"
+LONG_TASKS = HERE / "tasks-long"  # the same requests on accounts with years of earlier history, and those that turn on it
 SOLVE_SH = "#!/bin/bash\n# evals/run.py mounts the reference solution here for oracle runs.\npython /reference/solve.py\n"
 
 
@@ -51,11 +53,11 @@ def build_images() -> None:
         subprocess.run(["docker", "build", "-q", "-t", image, "-f", str(dockerfile), *args, str(context)], check=True)
 
 
-def build_task(scenario, config: str) -> None:
-    task = TASKS / scenario.id.lower()
+def build_task(scenario, config: str, tasks: Path = TASKS) -> None:
+    task = tasks / scenario.id.lower()
     (task / "environment").mkdir(parents=True)
     (task / "solution").mkdir()
-    for token, value in {"__NAME__": scenario.id.lower(), "__SCENARIO__": scenario.id,
+    for token, value in {"__NAME__": scenario.id.lower(), "__SCENARIO__": scenario.id, "__LONG__": str(int(tasks == LONG_TASKS)),
                          "__DIFFICULTY__": scenario.difficulty, "__ARCHETYPE__": scenario.archetype}.items():
         config = config.replace(token, value)
     (task / "task.toml").write_text(config)
@@ -69,6 +71,9 @@ if __name__ == "__main__":
     shutil.rmtree(TASKS, ignore_errors=True)
     for scenario in ALL:
         build_task(scenario, (HERE / "task.toml").read_text())
+    shutil.rmtree(LONG_TASKS, ignore_errors=True)
+    for scenario in long_accounts():
+        build_task(scenario, (HERE / "task.toml").read_text(), LONG_TASKS)
     # Harbor copies only agents/ into the agent's container, so the policy has to be inside it.
     (ROOT / "agents/policy.md").write_text((ROOT / "docs/policy.md").read_text())
-    print(f"built 3 images and {len(ALL)} tasks in {TASKS.relative_to(ROOT)}/")
+    print(f"built 3 images, {len(ALL)} tasks in {TASKS.relative_to(ROOT)}/ and {len(long_accounts())} in {LONG_TASKS.relative_to(ROOT)}/")

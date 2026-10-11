@@ -1,7 +1,7 @@
 """Put the judge's answers on each trial's run in LangSmith, as scores beside the grader's.
 
-    uv run --with matplotlib --with "openai>=3.26" --env-file .env python evals/judge_push.py <commit>          # match trials to runs, send nothing
-    uv run --with matplotlib --with "openai>=3.26" --env-file .env python evals/judge_push.py <commit> --push
+    uv run --with matplotlib --with "langchain-openai>=1.7.0" --env-file .env python evals/judge_push.py <commit>          # match trials to runs, send nothing
+    uv run --with matplotlib --with "langchain-openai>=1.7.0" --env-file .env python evals/judge_push.py <commit> --push
     ... --only <job name>    one experiment
     ... --dataset <name>     a dataset other than the one evals/run.py records in
 
@@ -40,7 +40,7 @@ def scores(commit: str) -> dict[str, dict[str, float]]:
         line = lines.get(b.trial)
         if line is None or not line.answers:
             continue
-        found = {f"reply_{a.name}": judge.fault(a) for a in line.answers}
+        found = {f"reply_{name}": judge.fault(a) for name, a in line.answers.items()}
         found |= {f"reply_{check}": float(test(b)) for check, test in judge.IN_CODE.items()}
         out[b.trial] = {key: value for key, value in found.items() if value is not None}
     return out

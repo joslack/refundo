@@ -1,0 +1,492 @@
+diff --git a/next.config.mjs b/next.config.mjs
+index fc5e0f6..46a4e89 100644
+--- a/next.config.mjs
++++ b/next.config.mjs
+@@ -1,5 +1,6 @@
+ /** @type {import('next').NextConfig} */
+ const nextConfig = {
++  devIndicators: false,
+   experimental: {
+     serverActions: {
+       bodySizeLimit: "10mb",
+diff --git a/src/components/icons/langgraph.tsx b/src/components/icons/langgraph.tsx
+index 9b27bd6..1b55f22 100644
+--- a/src/components/icons/langgraph.tsx
++++ b/src/components/icons/langgraph.tsx
+@@ -16,7 +16,7 @@ export function LangGraphLogoSVG({
+       fill="none"
+       xmlns="http://www.w3.org/2000/svg"
+     >
+-      <g clip-path="url(#clip0_7880_26096)">
++      <g clipPath="url(#clip0_7880_26096)">
+         <path
+           d="M1599.44 227.244H1598.94C1589.71 205.732 1563.05 182.656 1518.96 182.656C1447.21 182.656 1395.95 232.889 1395.95 316.953C1395.95 401.018 1447.71 452.28 1519.45 452.28C1565.07 452.28 1588.64 429.738 1598.9 404.641H1599.4V436.413C1599.4 481.535 1576.32 503.047 1534.82 503.047C1499.96 503.047 1476.92 490.727 1470.78 462.044H1406.21C1413.38 514.337 1461.59 553.28 1535.89 553.28C1606.11 553.28 1668.62 517.884 1668.62 427.183V189.827H1599.47V227.244H1599.44ZM1533.79 400.522C1486.12 400.522 1462.01 361.045 1462.01 317.487C1462.01 273.929 1486.61 234.987 1533.79 234.987C1580.97 234.987 1605.54 279.574 1605.54 317.487C1605.54 355.4 1586.05 400.522 1533.79 400.522Z"
+           fill="#030710"
+@@ -62,7 +62,7 @@ export function LangGraphLogoSVG({
+           fill="#030710"
+         />
+       </g>
+-      <g clip-path="url(#clip1_7880_26096)">
++      <g clipPath="url(#clip1_7880_26096)">
+         <path
+           d="M153.197 324.988C181.918 296.266 198.063 257.269 198.063 216.654C198.063 176.039 181.904 137.042 153.197 108.32L44.866 0C16.159 28.7218 0 67.7192 0 108.334C0 148.949 16.159 187.946 44.866 216.668L153.183 324.988H153.197Z"
+           fill="#030710"
+diff --git a/src/components/thread/markdown-text.tsx b/src/components/thread/markdown-text.tsx
+index d93fa65..685497a 100644
+--- a/src/components/thread/markdown-text.tsx
++++ b/src/components/thread/markdown-text.tsx
+@@ -247,7 +247,7 @@ const MarkdownTextImpl: FC<{ children: string }> = ({ children }) => {
+   return (
+     <div className="markdown-content">
+       <ReactMarkdown
+-        remarkPlugins={[remarkGfm, remarkMath]}
++        remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }]]}
+         rehypePlugins={[rehypeKatex]}
+         components={defaultComponents}
+       >
+diff --git a/src/components/thread/messages/ai.tsx b/src/components/thread/messages/ai.tsx
+index 3c4c3b3..0d1b345 100644
+--- a/src/components/thread/messages/ai.tsx
++++ b/src/components/thread/messages/ai.tsx
+@@ -147,7 +147,7 @@ export function AssistantMessage({
+   }
+ 
+   return (
+-    <div className="group mr-auto flex w-full items-start gap-2">
++    <div className="group mr-auto flex w-full items-start gap-2 has-[>div:empty]:hidden">
+       <div className="flex w-full flex-col gap-2">
+         {isToolResult ? (
+           <>
+@@ -194,6 +194,7 @@ export function AssistantMessage({
+             <div
+               className={cn(
+                 "mr-auto flex items-center gap-2 transition-opacity",
++                contentString.length === 0 && "hidden",
+                 "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
+               )}
+             >
+diff --git a/src/components/thread/messages/tool-calls.tsx b/src/components/thread/messages/tool-calls.tsx
+index b66e8a2..704ead5 100644
+--- a/src/components/thread/messages/tool-calls.tsx
++++ b/src/components/thread/messages/tool-calls.tsx
+@@ -1,10 +1,193 @@
+ import { AIMessage, ToolMessage } from "@langchain/langgraph-sdk";
+ import { useState } from "react";
+-import { motion, AnimatePresence } from "framer-motion";
+-import { ChevronDown, ChevronUp } from "lucide-react";
++import { Check, ChevronRight, Loader2 } from "lucide-react";
++import { useStreamContext } from "@/providers/Stream";
++import { cn } from "@/lib/utils";
+ 
+-function isComplexValue(value: any): boolean {
+-  return Array.isArray(value) || (typeof value === "object" && value !== null);
++type ToolCall = NonNullable<AIMessage["tool_calls"]>[number];
++
++/** A tool message's text, whether its content is a string or a list of content blocks. */
++function resultText(message: ToolMessage | undefined): string | undefined {
++  if (!message) return undefined;
++  const content = message.content as unknown;
++  if (typeof content === "string") return content;
++  if (Array.isArray(content)) {
++    return content
++      .map((block) =>
++        typeof block === "string"
++          ? block
++          : block && typeof block === "object" && "text" in block
++            ? String((block as { text: unknown }).text)
++            : "",
++      )
++      .join("");
++  }
++  return content == null ? "" : JSON.stringify(content);
++}
++
++function parsed(text: string): unknown {
++  try {
++    return JSON.parse(text);
++  } catch {
++    return text;
++  }
++}
++
++function short(value: unknown): string {
++  if (value === null || value === undefined) return "none";
++  if (Array.isArray(value)) return `${value.length} items`;
++  if (typeof value === "object") return "…";
++  return String(value);
++}
++
++/** One line that says what came back, for the closed row. */
++function preview(value: unknown, args: Record<string, unknown>): string {
++  if (value === "" || (Array.isArray(value) && value.length === 0)) {
++    return "no records";
++  }
++  if (Array.isArray(value)) {
++    return value.length === 1 ? "1 record" : `${value.length} records`;
++  }
++  if (value && typeof value === "object") {
++    return Object.entries(value)
++      .filter(([key]) => !(key in args))
++      .slice(0, 3)
++      .map(([key, inner]) => `${key}: ${short(inner)}`)
++      .join(" · ");
++  }
++  return String(value ?? "");
++}
++
++function pretty(value: unknown): string {
++  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
++}
++
++function Block({ label, children }: { label: string; children: string }) {
++  return (
++    <div>
++      <div className="mb-1 text-[11px] font-medium tracking-wide text-gray-500 uppercase">
++        {label}
++      </div>
++      <pre className="max-h-72 overflow-auto rounded-md bg-gray-50 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-gray-800">
++        {children}
++      </pre>
++    </div>
++  );
++}
++
++function CallRow({ call, result }: { call: ToolCall; result?: string }) {
++  const [open, setOpen] = useState(false);
++  const args = (call.args ?? {}) as Record<string, unknown>;
++  const hasArgs = Object.keys(args).length > 0;
++  const value = result === undefined ? undefined : parsed(result);
++  const summary = hasArgs
++    ? Object.entries(args)
++        .map(([key, inner]) => `${key}: ${short(inner)}`)
++        .join(", ")
++    : "";
++
++  return (
++    <div>
++      <button
++        type="button"
++        onClick={() => setOpen(!open)}
++        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50"
++      >
++        {result === undefined ? (
++          <Loader2 className="size-3.5 shrink-0 animate-spin text-gray-400" />
++        ) : (
++          <Check className="size-3.5 shrink-0 text-emerald-600" />
++        )}
++        <span className="shrink-0 font-mono text-[13px] font-medium text-gray-900">
++          {call.name}
++        </span>
++        {summary && (
++          <span className="shrink-0 font-mono text-xs text-gray-500">
++            {summary}
++          </span>
++        )}
++        <span className="min-w-0 flex-1 truncate text-right text-xs text-gray-500">
++          {value === undefined ? "running" : preview(value, args)}
++        </span>
++        <ChevronRight
++          className={cn(
++            "size-4 shrink-0 text-gray-400 transition-transform",
++            open && "rotate-90",
++          )}
++        />
++      </button>
++      {open && (
++        <div className="flex flex-col gap-3 border-t border-gray-100 px-3 py-3">
++          {hasArgs && <Block label="Arguments">{pretty(args)}</Block>}
++          {value !== undefined && <Block label="Result">{pretty(value)}</Block>}
++        </div>
++      )}
++    </div>
++  );
++}
++
++const ACTIONS: Record<string, { label: string; tone: string }> = {
++  cash_refund: { label: "Cash refund", tone: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
++  account_credit: { label: "Account credit", tone: "bg-sky-50 text-sky-700 ring-sky-200" },
++  deny: { label: "Deny", tone: "bg-rose-50 text-rose-700 ring-rose-200" },
++  escalate: { label: "Escalate", tone: "bg-amber-50 text-amber-800 ring-amber-200" },
++  no_action: { label: "No action", tone: "bg-gray-100 text-gray-700 ring-gray-200" },
++};
++
++/** The agent's decision, which is the one tool call a reader has to be able to read at a glance. */
++function Proposal({ call, result }: { call: ToolCall; result?: string }) {
++  const args = (call.args ?? {}) as Record<string, any>;
++  const action = ACTIONS[args.action] ?? {
++    label: String(args.action ?? "?"),
++    tone: "bg-gray-100 text-gray-700 ring-gray-200",
++  };
++  const sections: string[] = Array.isArray(args.sections) ? args.sections : [];
++  const state =
++    result === undefined
++      ? { text: "Waits for a person", tone: "text-amber-700" }
++      : result.includes("reviewer replaced")
++        ? { text: "Recorded with a reviewer's changes", tone: "text-emerald-700" }
++        : result.includes("Recorded")
++          ? { text: "Recorded", tone: "text-emerald-700" }
++          : { text: "Sent back by a reviewer", tone: "text-rose-700" };
++
++  return (
++    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
++      <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 px-4 py-3">
++        <span className="text-[11px] font-medium tracking-wide text-gray-500 uppercase">
++          Proposal
++        </span>
++        <span
++          className={cn(
++            "rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
++            action.tone,
++          )}
++        >
++          {action.label}
++        </span>
++        <span className="text-base font-semibold text-gray-900 tabular-nums">
++          {"$"}
++          {((Number(args.amount_cents) || 0) / 100).toLocaleString("en-US", {
++            minimumFractionDigits: 2,
++            maximumFractionDigits: 2,
++          })}
++        </span>
++        {sections.length > 0 && (
++          <span className="text-xs text-gray-500">
++            Policy {sections.map((s) => `§${s}`).join(", ")}
++          </span>
++        )}
++        <span className={cn("ml-auto text-xs font-medium", state.tone)}>
++          {state.text}
++        </span>
++      </div>
++      {args.rationale && (
++        <p className="px-4 py-3 text-sm leading-relaxed text-gray-700">
++          {String(args.rationale)}
++        </p>
++      )}
++    </div>
++  );
+ }
+ 
+ export function ToolCalls({
+@@ -12,180 +195,57 @@ export function ToolCalls({
+ }: {
+   toolCalls: AIMessage["tool_calls"];
+ }) {
++  const thread = useStreamContext();
+   if (!toolCalls || toolCalls.length === 0) return null;
+ 
++  const resultOf = (call: ToolCall) =>
++    resultText(
++      thread.messages.find(
++        (m) => m.type === "tool" && (m as ToolMessage).tool_call_id === call.id,
++      ) as ToolMessage | undefined,
++    );
++  const proposals = toolCalls.filter((tc) => tc.name === "submit_proposal");
++  const others = toolCalls.filter((tc) => tc.name !== "submit_proposal");
++
+   return (
+-    <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
+-      {toolCalls.map((tc, idx) => {
+-        const args = tc.args as Record<string, any>;
+-        const hasArgs = Object.keys(args).length > 0;
+-        return (
+-          <div
+-            key={idx}
+-            className="overflow-hidden rounded-lg border border-gray-200"
+-          >
+-            <div className="border-b border-gray-200 bg-gray-50 px-4 py-2">
+-              <h3 className="font-medium text-gray-900">
+-                {tc.name}
+-                {tc.id && (
+-                  <code className="ml-2 rounded bg-gray-100 px-2 py-1 text-sm">
+-                    {tc.id}
+-                  </code>
+-                )}
+-              </h3>
+-            </div>
+-            {hasArgs ? (
+-              <table className="min-w-full divide-y divide-gray-200">
+-                <tbody className="divide-y divide-gray-200">
+-                  {Object.entries(args).map(([key, value], argIdx) => (
+-                    <tr key={argIdx}>
+-                      <td className="px-4 py-2 text-sm font-medium whitespace-nowrap text-gray-900">
+-                        {key}
+-                      </td>
+-                      <td className="px-4 py-2 text-sm text-gray-500">
+-                        {isComplexValue(value) ? (
+-                          <code className="rounded bg-gray-50 px-2 py-1 font-mono text-sm break-all">
+-                            {JSON.stringify(value, null, 2)}
+-                          </code>
+-                        ) : (
+-                          String(value)
+-                        )}
+-                      </td>
+-                    </tr>
+-                  ))}
+-                </tbody>
+-              </table>
+-            ) : (
+-              <code className="block p-3 text-sm">{"{}"}</code>
+-            )}
+-          </div>
+-        );
+-      })}
++    <div className="flex w-full flex-col gap-2">
++      {others.length > 0 && (
++        <div className="divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200 bg-white">
++          {others.map((tc, idx) => (
++            <CallRow
++              key={tc.id ?? idx}
++              call={tc}
++              result={resultOf(tc)}
++            />
++          ))}
++        </div>
++      )}
++      {proposals.map((tc, idx) => (
++        <Proposal
++          key={tc.id ?? idx}
++          call={tc}
++          result={resultOf(tc)}
++        />
++      ))}
+     </div>
+   );
+ }
+ 
++/** A tool's result is shown in the row of its call. One with no call in the thread gets a row of its own. */
+ export function ToolResult({ message }: { message: ToolMessage }) {
+-  const [isExpanded, setIsExpanded] = useState(false);
+-
+-  let parsedContent: any;
+-  let isJsonContent = false;
+-
+-  try {
+-    if (typeof message.content === "string") {
+-      parsedContent = JSON.parse(message.content);
+-      isJsonContent = isComplexValue(parsedContent);
+-    }
+-  } catch {
+-    // Content is not JSON, use as is
+-    parsedContent = message.content;
+-  }
+-
+-  const contentStr = isJsonContent
+-    ? JSON.stringify(parsedContent, null, 2)
+-    : String(message.content);
+-  const contentLines = contentStr.split("\n");
+-  const shouldTruncate = contentLines.length > 4 || contentStr.length > 500;
+-  const displayedContent =
+-    shouldTruncate && !isExpanded
+-      ? contentStr.length > 500
+-        ? contentStr.slice(0, 500) + "..."
+-        : contentLines.slice(0, 4).join("\n") + "\n..."
+-      : contentStr;
+-
++  const thread = useStreamContext();
++  const hasCall = thread.messages.some(
++    (m) =>
++      m.type === "ai" &&
++      (m as AIMessage).tool_calls?.some((tc) => tc.id === message.tool_call_id),
++  );
++  if (hasCall) return null;
+   return (
+-    <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
+-      <div className="overflow-hidden rounded-lg border border-gray-200">
+-        <div className="border-b border-gray-200 bg-gray-50 px-4 py-2">
+-          <div className="flex flex-wrap items-center justify-between gap-2">
+-            {message.name ? (
+-              <h3 className="font-medium text-gray-900">
+-                Tool Result:{" "}
+-                <code className="rounded bg-gray-100 px-2 py-1">
+-                  {message.name}
+-                </code>
+-              </h3>
+-            ) : (
+-              <h3 className="font-medium text-gray-900">Tool Result</h3>
+-            )}
+-            {message.tool_call_id && (
+-              <code className="ml-2 rounded bg-gray-100 px-2 py-1 text-sm">
+-                {message.tool_call_id}
+-              </code>
+-            )}
+-          </div>
+-        </div>
+-        <motion.div
+-          className="min-w-full bg-gray-100"
+-          initial={false}
+-          animate={{ height: "auto" }}
+-          transition={{ duration: 0.3 }}
+-        >
+-          <div className="p-3">
+-            <AnimatePresence
+-              mode="wait"
+-              initial={false}
+-            >
+-              <motion.div
+-                key={isExpanded ? "expanded" : "collapsed"}
+-                initial={{ opacity: 0, y: 20 }}
+-                animate={{ opacity: 1, y: 0 }}
+-                exit={{ opacity: 0, y: -20 }}
+-                transition={{ duration: 0.2 }}
+-              >
+-                {isJsonContent ? (
+-                  <table className="min-w-full divide-y divide-gray-200">
+-                    <tbody className="divide-y divide-gray-200">
+-                      {(Array.isArray(parsedContent)
+-                        ? isExpanded
+-                          ? parsedContent
+-                          : parsedContent.slice(0, 5)
+-                        : Object.entries(parsedContent)
+-                      ).map((item, argIdx) => {
+-                        const [key, value] = Array.isArray(parsedContent)
+-                          ? [argIdx, item]
+-                          : [item[0], item[1]];
+-                        return (
+-                          <tr key={argIdx}>
+-                            <td className="px-4 py-2 text-sm font-medium whitespace-nowrap text-gray-900">
+-                              {key}
+-                            </td>
+-                            <td className="px-4 py-2 text-sm text-gray-500">
+-                              {isComplexValue(value) ? (
+-                                <code className="rounded bg-gray-50 px-2 py-1 font-mono text-sm break-all">
+-                                  {JSON.stringify(value, null, 2)}
+-                                </code>
+-                              ) : (
+-                                String(value)
+-                              )}
+-                            </td>
+-                          </tr>
+-                        );
+-                      })}
+-                    </tbody>
+-                  </table>
+-                ) : (
+-                  <code className="block text-sm">{displayedContent}</code>
+-                )}
+-              </motion.div>
+-            </AnimatePresence>
+-          </div>
+-          {((shouldTruncate && !isJsonContent) ||
+-            (isJsonContent &&
+-              Array.isArray(parsedContent) &&
+-              parsedContent.length > 5)) && (
+-            <motion.button
+-              onClick={() => setIsExpanded(!isExpanded)}
+-              className="flex w-full cursor-pointer items-center justify-center border-t-[1px] border-gray-200 py-2 text-gray-500 transition-all duration-200 ease-in-out hover:bg-gray-50 hover:text-gray-600"
+-              initial={{ scale: 1 }}
+-              whileHover={{ scale: 1.02 }}
+-              whileTap={{ scale: 0.98 }}
+-            >
+-              {isExpanded ? <ChevronUp /> : <ChevronDown />}
+-            </motion.button>
+-          )}
+-        </motion.div>
+-      </div>
++    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
++      <CallRow
++        call={{ name: message.name ?? "tool", args: {}, id: message.tool_call_id }}
++        result={resultText(message)}
++      />
+     </div>
+   );
+ }
