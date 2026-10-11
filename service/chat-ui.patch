@@ -31,6 +31,328 @@ index 9b27bd6..1b55f22 100644
          <path
            d="M153.197 324.988C181.918 296.266 198.063 257.269 198.063 216.654C198.063 176.039 181.904 137.042 153.197 108.32L44.866 0C16.159 28.7218 0 67.7192 0 108.334C0 148.949 16.159 187.946 44.866 216.668L153.183 324.988H153.197Z"
            fill="#030710"
+diff --git a/src/components/thread/index.tsx b/src/components/thread/index.tsx
+index fbb71e7..b7d7dc8 100644
+--- a/src/components/thread/index.tsx
++++ b/src/components/thread/index.tsx
+@@ -2,10 +2,12 @@ import { v4 as uuidv4 } from "uuid";
+ import { ReactNode, useEffect, useRef } from "react";
+ import { motion } from "framer-motion";
+ import { cn } from "@/lib/utils";
+-import { useStreamContext } from "@/providers/Stream";
++import { useCustomers, useStreamContext } from "@/providers/Stream";
+ import { useState, FormEvent } from "react";
+ import { Button } from "../ui/button";
+-import { Checkpoint, Message } from "@langchain/langgraph-sdk";
++import { AIMessage, Checkpoint, Message } from "@langchain/langgraph-sdk";
++import { MarkdownText } from "./markdown-text";
++import { getContentString } from "./utils";
+ import { AssistantMessage, AssistantMessageLoading } from "./messages/ai";
+ import { HumanMessage } from "./messages/human";
+ import {
+@@ -135,6 +137,40 @@ function ConnectedHost({ apiUrl }: { apiUrl: string }) {
+   );
+ }
+ 
++// What the customer sees of a message: their own words, and the agent's answer at the end of a turn. The tool
++// calls, their results and the notes the agent writes between them are for support staff. While the agent works,
++// a note arrives as text before the tool calls that mark it as a note, so nothing the agent writes in a turn is
++// shown until the turn is over.
++function CustomerMessage({
++  message,
++  turnOpen,
++}: {
++  message: Message;
++  turnOpen: boolean;
++}) {
++  const text = getContentString(message.content).trim();
++  if (!text) return null;
++  if (message.type === "human") {
++    return (
++      <p className="bg-muted ml-auto w-fit rounded-3xl px-4 py-2 whitespace-pre-wrap">
++        {text}
++      </p>
++    );
++  }
++  if (
++    message.type !== "ai" ||
++    turnOpen ||
++    (message as AIMessage).tool_calls?.length
++  ) {
++    return null;
++  }
++  return (
++    <div className="mr-auto py-1">
++      <MarkdownText>{text}</MarkdownText>
++    </div>
++  );
++}
++
+ export function Thread() {
+   const [artifactContext, setArtifactContext] = useArtifactContext();
+   const [artifactOpen, closeArtifact] = useArtifactOpen();
+@@ -163,9 +199,49 @@ export function Thread() {
+   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
+ 
+   const stream = useStreamContext();
+-  const messages = stream.messages;
+   const isLoading = stream.isLoading;
+ 
++  // The customer's view is the default. view=staff in the address shows the tool calls and the review card.
++  const [view] = useQueryState("view");
++  const staff = view === "staff";
++  const [assistantId, setAssistantId] = useQueryState("assistantId");
++  const [, setApiUrl] = useQueryState("apiUrl");
++  const customer = useCustomers().find((c) => c.assistantId === assistantId);
++
++  // A reviewer answers a waiting request from another page, and this page's stream does not hear of it. So while
++  // a request waits, the customer's view asks the server about the conversation, and when the agent has finished
++  // it the stream is started again, which reads the conversation as the server has it. A message sent on the old
++  // stream would branch from the point where the request was still waiting.
++  const messages = stream.messages;
++  const last = messages[messages.length - 1];
++  const waiting =
++    !staff &&
++    !isLoading &&
++    !!stream.interrupt &&
++    last?.type === "ai" &&
++    !!(last as AIMessage).tool_calls?.length;
++  // What the agent wrote for the customer to read during the wait: an argument of the call that is waiting.
++  const whileWaiting = waiting
++    ? ((last as AIMessage).tool_calls?.find(
++        (call) => call.name === "submit_proposal",
++      )?.args?.message_while_waiting as string | undefined)
++    : undefined;
++  const { apiUrl, reload } = stream;
++  useEffect(() => {
++    if (!waiting || !threadId) return;
++    const timer = setInterval(async () => {
++      try {
++        const thread = await fetch(`${apiUrl}/threads/${threadId}`).then(
++          (found) => found.json(),
++        );
++        if (thread.status === "idle") reload();
++      } catch {
++        // the next try is two seconds away
++      }
++    }, 2000);
++    return () => clearInterval(timer);
++  }, [waiting, threadId, apiUrl, reload]);
++
+   const lastError = useRef<string | undefined>(undefined);
+ 
+   const setThreadId = (id: string | null) => {
+@@ -222,6 +298,7 @@ export function Thread() {
+     e.preventDefault();
+     if ((input.trim().length === 0 && contentBlocks.length === 0) || isLoading)
+       return;
++    if (waiting) return;
+     setFirstTokenReceived(false);
+ 
+     const newHumanMessage: Message = {
+@@ -274,6 +351,10 @@ export function Thread() {
+     });
+   };
+ 
++  const shown = messages.filter(
++    (m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX),
++  );
++  const lastHuman = shown.findLastIndex((m) => m.type === "human");
+   const chatStarted = !!threadId || !!messages.length;
+   const hasNoAIOrToolMessages = !messages.find(
+     (m) => m.type === "ai" || m.type === "tool",
+@@ -281,7 +362,7 @@ export function Thread() {
+ 
+   return (
+     <div className="flex h-screen w-full overflow-hidden">
+-      <div className="relative hidden lg:flex">
++      <div className={cn("relative hidden", staff && "lg:flex")}>
+         <motion.div
+           className="absolute z-20 h-full overflow-hidden border-r bg-white"
+           style={{ width: 300 }}
+@@ -332,7 +413,44 @@ export function Thread() {
+               : { duration: 0 }
+           }
+         >
+-          {!chatStarted && (
++          {!staff && (
++            <div className="relative z-10 flex items-center justify-between gap-3 border-b px-4 py-3">
++              <div>
++                <div className="font-semibold tracking-tight">
++                  Quillstack support
++                </div>
++                {customer && (
++                  <div className="text-muted-foreground text-xs">
++                    Signed in as {customer.name}, {customer.role},{" "}
++                    {customer.workspace}
++                  </div>
++                )}
++              </div>
++              <div className="flex items-center gap-2">
++                {chatStarted && (
++                  <Button
++                    variant="ghost"
++                    size="sm"
++                    onClick={() => setThreadId(null)}
++                  >
++                    New conversation
++                  </Button>
++                )}
++                <Button
++                  variant="outline"
++                  size="sm"
++                  onClick={() => {
++                    setThreadId(null);
++                    setAssistantId(null);
++                    setApiUrl(null);
++                  }}
++                >
++                  Sign out
++                </Button>
++              </div>
++            </div>
++          )}
++          {staff && !chatStarted && (
+             <div className="absolute top-0 left-0 z-10 flex w-full items-center justify-between gap-3 p-2 pl-4">
+               <div>
+                 {(!chatHistoryOpen || !isLargeScreen) && (
+@@ -354,7 +472,7 @@ export function Thread() {
+               </div>
+             </div>
+           )}
+-          {chatStarted && (
++          {staff && chatStarted && (
+             <div className="relative z-10 flex items-center justify-between gap-3 p-2">
+               <div className="relative flex items-center justify-start gap-2">
+                 <div className="absolute left-0 z-10">
+@@ -424,10 +542,14 @@ export function Thread() {
+               contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
+               content={
+                 <>
+-                  {messages
+-                    .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
+-                    .map((message, index) =>
+-                      message.type === "human" ? (
++                  {shown.map((message, index) =>
++                      !staff ? (
++                        <CustomerMessage
++                          key={message.id || `${message.type}-${index}`}
++                          message={message}
++                          turnOpen={isLoading && index > lastHuman}
++                        />
++                      ) : message.type === "human" ? (
+                         <HumanMessage
+                           key={message.id || `${message.type}-${index}`}
+                           message={message}
+@@ -444,7 +566,7 @@ export function Thread() {
+                     )}
+                   {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
+                     We need to render it outside of the messages list, since there are no messages to render */}
+-                  {hasNoAIOrToolMessages && !!stream.interrupt && (
++                  {staff && hasNoAIOrToolMessages && !!stream.interrupt && (
+                     <AssistantMessage
+                       key="interrupt-msg"
+                       message={undefined}
+@@ -452,14 +574,26 @@ export function Thread() {
+                       handleRegenerate={handleRegenerate}
+                     />
+                   )}
+-                  {isLoading && !firstTokenReceived && (
++                  {isLoading && (!staff || !firstTokenReceived) && (
+                     <AssistantMessageLoading />
+                   )}
++                  {whileWaiting && (
++                    <div className="mr-auto py-1">
++                      <MarkdownText>{whileWaiting}</MarkdownText>
++                    </div>
++                  )}
++                  {waiting && (
++                    <div className="text-muted-foreground mr-auto flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm">
++                      <LoaderCircle className="size-4 animate-spin" />A support
++                      specialist is checking this request. The answer will
++                      arrive here.
++                    </div>
++                  )}
+                 </>
+               }
+               footer={
+                 <div className="sticky bottom-0 flex flex-col items-center gap-8 bg-white">
+-                  {!chatStarted && (
++                  {!chatStarted && staff && (
+                     <div className="flex items-center gap-3">
+                       <LangGraphLogoSVG className="h-8 flex-shrink-0" />
+                       <h1 className="text-2xl font-semibold tracking-tight">
+@@ -467,6 +601,30 @@ export function Thread() {
+                       </h1>
+                     </div>
+                   )}
++                  {!chatStarted && !staff && (
++                    <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
++                      <h1 className="text-2xl font-semibold tracking-tight">
++                        How can we help
++                        {customer ? `, ${customer.name.split(" ")[0]}` : ""}?
++                      </h1>
++                      {customer && (
++                        <p className="text-muted-foreground text-sm">
++                          Demo: choose a message this customer would write, or
++                          write your own.
++                        </p>
++                      )}
++                      {customer?.messages.map((message) => (
++                        <button
++                          key={message}
++                          type="button"
++                          onClick={() => setInput(message)}
++                          className="bg-background cursor-pointer rounded-xl border px-3 py-2 text-left text-sm transition-colors hover:border-gray-400"
++                        >
++                          {message}
++                        </button>
++                      ))}
++                    </div>
++                  )}
+ 
+                   <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 absolute bottom-full left-1/2 mb-4 -translate-x-1/2" />
+ 
+@@ -504,12 +662,17 @@ export function Thread() {
+                             form?.requestSubmit();
+                           }
+                         }}
+-                        placeholder="Type your message..."
++                        disabled={waiting}
++                        placeholder={
++                          waiting
++                            ? "This request is with a specialist."
++                            : "Type your message..."
++                        }
+                         className="field-sizing-content resize-none border-none bg-transparent p-3.5 pb-0 shadow-none ring-0 outline-none focus:ring-0 focus:outline-none"
+                       />
+ 
+                       <div className="flex items-center gap-6 p-2 pt-4">
+-                        <div>
++                        <div className={cn(!staff && "hidden")}>
+                           <div className="flex items-center space-x-2">
+                             <Switch
+                               id="render-tool-calls"
+@@ -526,7 +689,10 @@ export function Thread() {
+                         </div>
+                         <Label
+                           htmlFor="file-input"
+-                          className="flex cursor-pointer items-center gap-2"
++                          className={cn(
++                            "flex cursor-pointer items-center gap-2",
++                            !staff && "hidden",
++                          )}
+                         >
+                           <Plus className="size-5 text-gray-600" />
+                           <span className="text-sm text-gray-600">
+@@ -556,6 +722,7 @@ export function Thread() {
+                             className="ml-auto shadow-md transition-all"
+                             disabled={
+                               isLoading ||
++                              waiting ||
+                               (!input.trim() && contentBlocks.length === 0)
+                             }
+                           >
 diff --git a/src/components/thread/markdown-text.tsx b/src/components/thread/markdown-text.tsx
 index d93fa65..685497a 100644
 --- a/src/components/thread/markdown-text.tsx
@@ -490,3 +812,274 @@ index b66e8a2..704ead5 100644
      </div>
    );
  }
+diff --git a/src/providers/Stream.tsx b/src/providers/Stream.tsx
+index 0e96e77..b31cce9 100644
+--- a/src/providers/Stream.tsx
++++ b/src/providers/Stream.tsx
+@@ -5,6 +5,7 @@ import React, {
+   useState,
+   useEffect,
+   useMemo,
++  useCallback,
+ } from "react";
+ import { useStream } from "@langchain/langgraph-sdk/react";
+ import { type Message } from "@langchain/langgraph-sdk";
+@@ -16,14 +17,7 @@ import {
+   type RemoveUIMessage,
+ } from "@langchain/langgraph-sdk/react-ui";
+ import { useQueryState } from "nuqs";
+-import { Input } from "@/components/ui/input";
+-import { Button } from "@/components/ui/button";
+-import { LangGraphLogoSVG } from "@/components/icons/langgraph";
+-import { Label } from "@/components/ui/label";
+-import { Switch } from "@/components/ui/switch";
+-import { ArrowRight } from "lucide-react";
+-import { PasswordInput } from "@/components/ui/password-input";
+-import { getApiKey, setApiKey as storeApiKey } from "@/lib/api-key";
++import { getApiKey } from "@/lib/api-key";
+ import { resolveApiUrl } from "@/lib/resolve-api-url";
+ import { useThreads } from "./Thread";
+ import { toast } from "sonner";
+@@ -44,6 +38,8 @@ const useTypedStream = useStream<
+ 
+ type StreamContextType = ReturnType<typeof useTypedStream> & {
+   apiUrl: string;
++  // Start the stream again, so that it reads the thread as the server has it now.
++  reload: () => void;
+ };
+ const StreamContext = createContext<StreamContextType | undefined>(undefined);
+ 
+@@ -78,8 +74,10 @@ const StreamSession = ({
+   apiUrl,
+   assistantId,
+   authScheme,
++  reload,
+ }: {
+   children: ReactNode;
++  reload: () => void;
+   apiKey: string | null;
+   apiUrl: string;
+   assistantId: string;
+@@ -133,16 +131,34 @@ const StreamSession = ({
+   }, [apiKey, apiUrl, authScheme]);
+ 
+   return (
+-    <StreamContext.Provider value={{ ...streamValue, apiUrl }}>
++    <StreamContext.Provider value={{ ...streamValue, apiUrl, reload }}>
+       {children}
+     </StreamContext.Provider>
+   );
+ };
+ 
+-// Default values for the form
+-const DEFAULT_API_URL = "http://localhost:2024";
+-const DEFAULT_ASSISTANT_ID = "agent";
+-const AGENT_BUILDER_AUTH_SCHEME = "langsmith-api-key";
++// A person the demo can sign in as. service/run.py writes the list from service/accounts.py.
++export type Customer = {
++  account: string;
++  assistantId: string;
++  apiUrl: string;
++  name: string;
++  role: string;
++  workspace: string;
++  situation: string;
++  messages: string[];
++};
++
++export function useCustomers(): Customer[] {
++  const [customers, setCustomers] = useState<Customer[]>([]);
++  useEffect(() => {
++    fetch("/customers.json")
++      .then((found) => found.json())
++      .then(setCustomers)
++      .catch(() => setCustomers([]));
++  }, []);
++  return customers;
++}
+ 
+ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
+   children,
+@@ -160,137 +176,53 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
+   const [assistantId, setAssistantId] = useQueryState("assistantId", {
+     defaultValue: envAssistantId || "",
+   });
+-  const [authScheme, setAuthScheme] = useQueryState("authScheme", {
++  const [authScheme] = useQueryState("authScheme", {
+     defaultValue: envAuthScheme || "",
+   });
+-  const [isAgentBuilder, setIsAgentBuilder] = useState(
+-    () =>
+-      (authScheme || envAuthScheme || "").toLowerCase() ===
+-      AGENT_BUILDER_AUTH_SCHEME,
+-  );
+-
+   const finalApiUrl = resolveApiUrl(apiUrl, envApiUrl);
+   const finalAssistantId = assistantId || envAssistantId;
+   const finalAuthScheme = authScheme || envAuthScheme || "";
+ 
+   const apiKey = useMemo(() => getApiKey(finalApiUrl) || "", [finalApiUrl]);
++  const customers = useCustomers();
++  const [session, setSession] = useState(0);
++  const reload = useCallback(() => setSession((n) => n + 1), []);
+ 
+-  // Show the form if we: don't have an API URL, or don't have an assistant ID
++  // Sign in as one of the demo's customers when the address names no assistant
+   if (!finalApiUrl || !finalAssistantId) {
+     return (
+-      <div className="flex min-h-screen w-full items-center justify-center p-4">
+-        <div className="animate-in fade-in-0 zoom-in-95 bg-background flex max-w-3xl flex-col rounded-lg border shadow-lg">
+-          <div className="mt-14 flex flex-col gap-2 border-b p-6">
+-            <div className="flex flex-col items-start gap-2">
+-              <LangGraphLogoSVG className="h-7" />
+-              <h1 className="text-xl font-semibold tracking-tight">
+-                Agent Chat
+-              </h1>
+-            </div>
+-            <p className="text-muted-foreground">
+-              Welcome to Agent Chat! Before you get started, you need to enter
+-              the URL of the deployment and the assistant / graph ID.
+-            </p>
+-          </div>
+-          <form
+-            onSubmit={(e) => {
+-              e.preventDefault();
+-
+-              const form = e.target as HTMLFormElement;
+-              const formData = new FormData(form);
+-              const apiUrl = formData.get("apiUrl") as string;
+-              const assistantId = formData.get("assistantId") as string;
+-              const apiKey = formData.get("apiKey") as string;
+-
+-              setApiUrl(apiUrl);
+-              storeApiKey(apiUrl, apiKey);
+-              setAssistantId(assistantId);
+-              setAuthScheme(isAgentBuilder ? AGENT_BUILDER_AUTH_SCHEME : "");
+-
+-              form.reset();
+-            }}
+-            className="bg-muted/50 flex flex-col gap-6 p-6"
+-          >
+-            <div className="flex flex-col gap-2">
+-              <Label htmlFor="apiUrl">
+-                Deployment URL<span className="text-rose-500">*</span>
+-              </Label>
+-              <p className="text-muted-foreground text-sm">
+-                This is the URL of your LangGraph deployment. Can be a local, or
+-                production deployment.
+-              </p>
+-              <Input
+-                id="apiUrl"
+-                name="apiUrl"
+-                className="bg-background"
+-                defaultValue={apiUrl || DEFAULT_API_URL}
+-                required
+-              />
+-            </div>
+-
+-            <div className="flex flex-col gap-2">
+-              <Label htmlFor="assistantId">
+-                Assistant / Graph ID<span className="text-rose-500">*</span>
+-              </Label>
+-              <p className="text-muted-foreground text-sm">
+-                This is the ID of the graph (can be the graph name), or
+-                assistant to fetch threads from, and invoke when actions are
+-                taken.
+-              </p>
+-              <Input
+-                id="assistantId"
+-                name="assistantId"
+-                className="bg-background"
+-                defaultValue={assistantId || DEFAULT_ASSISTANT_ID}
+-                required
+-              />
+-            </div>
+-
+-            <div className="flex flex-col gap-2">
+-              <Label htmlFor="apiKey">LangSmith API Key</Label>
+-              <p className="text-muted-foreground text-sm">
+-                This is <strong>NOT</strong> required if using a local LangGraph
+-                server. This value is stored in your browser's local storage and
+-                is only used to authenticate requests sent to your LangGraph
+-                server.
+-              </p>
+-              <PasswordInput
+-                id="apiKey"
+-                name="apiKey"
+-                defaultValue={apiKey ?? ""}
+-                className="bg-background"
+-                placeholder="lsv2_pt_..."
+-              />
+-            </div>
+-
+-            <div className="flex flex-col gap-3">
+-              <div className="flex items-center justify-between gap-4">
+-                <div className="flex flex-col gap-1">
+-                  <Label htmlFor="agentBuilderEnabled">
+-                    Built with Agent Builder
+-                  </Label>
+-                  <p className="text-muted-foreground text-sm">
+-                    Enable this for Agent Builder deployments.
+-                  </p>
+-                </div>
+-                <Switch
+-                  id="agentBuilderEnabled"
+-                  checked={isAgentBuilder}
+-                  onCheckedChange={setIsAgentBuilder}
+-                />
+-              </div>
+-            </div>
+-
+-            <div className="mt-2 flex justify-end">
+-              <Button
+-                type="submit"
+-                size="lg"
++      <div className="flex min-h-screen w-full items-center justify-center bg-gray-50 p-4">
++        <div className="w-full max-w-xl">
++          <h1 className="text-2xl font-semibold tracking-tight">
++            Quillstack support
++          </h1>
++          <p className="text-muted-foreground mt-1 text-sm">
++            Demo: sign in as one of these customers. On the real site the
++            customer is signed in before the chat opens.
++          </p>
++          <div className="mt-6 flex flex-col gap-3">
++            {customers.map((c) => (
++              <button
++                key={c.account}
++                onClick={() => {
++                  setApiUrl(c.apiUrl);
++                  setAssistantId(c.assistantId);
++                }}
++                className="bg-background cursor-pointer rounded-xl border p-4 text-left shadow-xs transition-colors hover:border-gray-400"
+               >
+-                Continue
+-                <ArrowRight className="size-5" />
+-              </Button>
+-            </div>
+-          </form>
++                <div className="flex items-baseline justify-between gap-3">
++                  <span className="font-medium">{c.name}</span>
++                  <span className="text-muted-foreground font-mono text-xs">
++                    {c.account}
++                  </span>
++                </div>
++                <div className="text-muted-foreground text-sm">
++                  {c.role}, {c.workspace}
++                </div>
++                <div className="mt-2 text-sm">{c.situation}</div>
++              </button>
++            ))}
++          </div>
+         </div>
+       </div>
+     );
+@@ -298,6 +230,8 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
+ 
+   return (
+     <StreamSession
++      key={session}
++      reload={reload}
+       apiKey={apiKey}
+       apiUrl={finalApiUrl}
+       assistantId={finalAssistantId}
