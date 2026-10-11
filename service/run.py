@@ -128,8 +128,9 @@ if __name__ == "__main__":
         compose("down", "-v")
         shutil.rmtree(ROOT / "service/.langgraph_api", ignore_errors=True)  # the threads, which point at those records
         sys.exit()
-    if not (ROOT / "agents/policy.md").exists():  # evals/build.py copies it too; the agents read it from there
-        shutil.copy(ROOT / "docs/policy.md", ROOT / "agents/policy.md")
+    # The agents read the policy from agents/policy.md, a copy that evals/build.py also writes. Each start writes it
+    # again, so the served agent has the policy as it is now.
+    shutil.copy(ROOT / "docs/policy.md", ROOT / "agents/policy.md")
     fetch_chat()
     print("Starting the accounts' records...", flush=True)
     start_records()
