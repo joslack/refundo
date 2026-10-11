@@ -63,7 +63,8 @@ def waiting(thread: dict) -> tuple[str, dict] | None:
 
 
 def resume(thread: dict, decision: dict) -> None:
-    client.runs.wait(thread["thread_id"], assistant_id(account_of(thread)), command={"resume": {"decisions": [decision]}})
+    client.runs.wait(thread["thread_id"], assistant_id(account_of(thread)), command={"resume": {"decisions": [decision]}},
+                     config={"configurable": {"reviewer": st.session_state["reviewer"]}})
 
 
 def review_setting() -> str:
@@ -109,6 +110,13 @@ def show_queue() -> None:
             st.subheader(f"{account_of(thread)}: {args.get('action')} {dollars(args.get('amount_cents'))}")
             st.caption("The customer wrote")
             st.write(customer_message(thread))
+            if args.get("message_while_waiting"):
+                st.caption("The customer is reading")
+                st.write(args["message_while_waiting"])
+            if args.get("action") == "escalate":
+                st.info(f"The agent escalated this and would have proposed {dollars(args.get('amount_cents'))}. To decide "
+                        "it now, change Action to the outcome and approve: the customer is told the outcome. Approved as "
+                        "it is, it stays escalated and the customer is told a specialist will follow up.")
             action = st.selectbox("Action", ACTIONS, index=ACTIONS.index(args["action"]) if args.get("action") in ACTIONS else 0,
                                   key=f"action-{key}")
             amount = st.number_input("Amount in dollars", value=(args.get("amount_cents") or 0) / 100, min_value=0.0, step=1.0,
@@ -118,6 +126,7 @@ def show_queue() -> None:
             edited = {"action": action, "amount_cents": round(amount * 100),
                       "sections": [s.strip() for s in sections.split(",") if s.strip()], "rationale": rationale}
             changed = edited != {k: args.get(k) for k in edited}
+            edited = args | edited  # the call keeps what this form does not show, such as the line the customer is reading
             approve, back = st.columns(2)
             if approve.button("Approve with these changes" if changed else "Approve", key=f"approve-{key}", type="primary"):
                 with st.spinner("The agent records the decision and writes its reply..."):
@@ -160,6 +169,7 @@ def show_requests() -> None:
 st.set_page_config(page_title="Refund requests", layout="wide")
 st.title("Refund requests")
 with st.sidebar:
+    st.text_input("Reviewing as", "Sam Ortiz", key="reviewer", help="Recorded on what you approve.")
     now = review_setting()
     chosen = st.radio("Decisions that wait for a person", list(REVIEW), index=list(REVIEW).index(now), format_func=REVIEW.get)
     if chosen != now:
