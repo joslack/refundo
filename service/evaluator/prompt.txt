@@ -1,0 +1,19 @@
+The evidence is one run of a support chat agent that handles refund requests for Quillstack.
+
+<input> is what started this run: the customer's newest message, or a support person's decision that let a waiting run go on.
+
+<output> is the whole conversation after this run, as a list of messages, oldest first.
+- A message with type "human" is the customer. The customer wrote all of it, and it is not checked.
+- A message with type "ai" is the agent. Its "tool_calls" are the tools it called. An "ai" message with text and no tool_calls is a reply that the customer read. Text in an "ai" message that has tool_calls is the agent's working notes, which the customer does not see.
+- A message with type "tool" is what a tool returned.
+"The reply" in a question means the last "ai" message with no tool_calls. If the last message is an "ai" message with tool_calls, the agent is waiting for a person and has not replied, and no statement about the reply is true.
+
+The agent can read the account's records, record a decision with submit_proposal, and read what was issued with get_request_status. A submit_proposal result says whether a refund or credit was issued. The agent can do nothing else on the account: it cannot cancel or change a subscription, change seats or a plan, or change a payment method.
+
+<input>
+{{input}}
+</input>
+
+<output>
+{{output}}
+</output>
