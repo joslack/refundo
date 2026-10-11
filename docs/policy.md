@@ -22,7 +22,7 @@ These terms have the meanings below everywhere in this policy, even where everyd
 - **Usage:** any Active Session by any Seat on the Workspace, including Seats other than the requester. An Active Session is a login followed by at least one create, edit, or export action. A login with no such action is not Usage.
 - **Renewal Timestamp:** the exact UTC time a renewal charge succeeded, as recorded on the invoice.
 - **Billing Period:** the time from one Renewal Timestamp to the next.
-- **Confirmed Cancellation:** either a cancellation event with status `completed` in the app event log, or a cancellation request submitted by the Owner or a Billing Admin, in the app or in a support ticket, before the Renewal Timestamp. A request that was submitted but failed to process still counts. When no such request exists, check the completed cancellation in both the app event log and the billing system's subscription record. If one puts it before the Renewal Timestamp and the other after, escalate under Section 11.
+- **Confirmed Cancellation:** either a cancellation event with status `completed` in the app event log, or a cancellation request submitted by the Owner or a Billing Admin, in the app or in a support ticket, before the Renewal Timestamp. A request that was submitted but failed to process still counts. When no such request exists, check the completed cancellation in both the app event log and the billing system's subscription record. If one puts it before the Renewal Timestamp and the other after, escalate under Section 11. A cancellation belongs to the subscription it ended. If the Workspace subscribed again afterwards, the earlier cancellation does not apply to charges on the new subscription.
 - **Within N days:** no more than N × 24 hours from the reference timestamp to the Request Time, the moment the request is first received. Usage and other events count up to the Request Time. All times are UTC, regardless of the customer's time zone.
 - **Amount Paid:** what was actually charged after discounts and applied credits, excluding tax.
 - **Account Credit:** a balance applied to future invoices. It is not cash and cannot be withdrawn or transferred.
@@ -84,7 +84,7 @@ Goodwill Refunds never apply to annual plans.
 A Goodwill Refund applies only when no earlier section grants a refund, and only when every condition below holds:
 
 - the Workspace is on a monthly plan;
-- the Workspace has at least 6 consecutive successful monthly charges, counting the charge being refunded;
+- the Workspace has at least 6 consecutive successful monthly charges, counting the charge being refunded. The charges must cover consecutive Billing Periods with no break: a period with no charge, such as the time between two subscriptions, ends the count;
 - no Goodwill Refund was issued to the Workspace in the previous 365 days (Billing Error refunds do not count);
 - the Workspace has received fewer than three Goodwill Refunds since it was created;
 - the request is made within 30 days of the charge; and

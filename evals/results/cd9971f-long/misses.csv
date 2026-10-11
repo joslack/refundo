@@ -1,0 +1,15 @@
+case,graph,model,effort,right,trials,expected_action,expected_amount_cents,given,models_missing_with_this_graph
+an-03,case_file,deepseek-v4p1-flash,medium,0,1,cash_refund,38794,nothing (1),deepseek-v4p1-flash
+an-04,case_file,deepseek-v4p1-flash,medium,0,1,deny,0,nothing (1),deepseek-v4p1-flash
+an-04,structured,deepseek-v4p1-flash,medium,0,1,deny,0,nothing (1),deepseek-v4p1-flash
+an-08,sql,deepseek-v4p1-flash,medium,0,1,account_credit,36666,nothing (1),deepseek-v4p1-flash
+be-14,case_file,deepseek-v4p1-flash,medium,0,1,deny,0,cash_refund 8000 (1),deepseek-v4p1-flash
+be-14,structured,deepseek-v4p1-flash,medium,0,1,deny,0,nothing (1),deepseek-v4p1-flash
+be-16,sql,deepseek-v4p1-flash,medium,0,1,escalate,8000,escalate 10000 (1),deepseek-v4p1-flash
+be-16,structured,deepseek-v4p1-flash,medium,0,1,escalate,8000,escalate 10000 (1),deepseek-v4p1-flash
+esc-12,case_file,deepseek-v4p1-flash,medium,0,1,escalate,8000,nothing (1),deepseek-v4p1-flash
+mo-02,case_file,deepseek-v4p1-flash,medium,0,1,deny,0,cash_refund 8000 (1),deepseek-v4p1-flash
+mo-07,case_file,deepseek-v4p1-flash,medium,0,1,deny,0,cash_refund 8000 (1),deepseek-v4p1-flash
+mo-07,sql,deepseek-v4p1-flash,medium,0,1,deny,0,cash_refund 8000 (1),deepseek-v4p1-flash
+mo-07,structured,deepseek-v4p1-flash,medium,0,1,deny,0,cash_refund 8000 (1),deepseek-v4p1-flash
+re-03,case_file,deepseek-v4p1-flash,medium,0,1,escalate,28000,nothing (1),deepseek-v4p1-flash
