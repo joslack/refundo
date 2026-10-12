@@ -378,6 +378,7 @@ The 80 cases no longer separated the agents, so each account got years of histor
 | **structured** | 93 | $0.012 | 37 | 59,600 |
 | **case_file** | 93 | $0.023 | 31 | 119,500 |
 | **sql** | 92 | $0.013 | 80 | 89,000 |
+| **pipeline** | 93 | $0.020 | 41 | 56,000 |
 
 <span class="small">DeepSeek V4.1 Flash at medium effort. A long account is about 49,000 tokens.</span>
 
