@@ -34,3 +34,6 @@ agents/policy.md
 
 # LangChain's Agent Chat UI, fetched by service/run.py
 service/chat-ui/
+deck/material/
+deck/slides.private.md
+deck/checklist.md

@@ -11,9 +11,11 @@ It starts four things:
     the page      service/review.py on port 8501: send a request, and review what waits for a person
     the chat      LangChain's Agent Chat UI on port 3000, fetched into service/chat-ui the first time. It needs Node.
 
-Without --trace nothing is sent to LangSmith, whatever .env says.
+Without --trace nothing is sent to LangSmith, whatever .env says. With it, the traces go to the project that
+LANGSMITH_PROJECT names in .env, which is kept apart from the project the evaluations trace to.
 """
 
+import json
 import os
 import shutil
 import signal
@@ -26,12 +28,13 @@ from langgraph_sdk import get_sync_client
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "service"))
-from accounts import ACCOUNTS, FIRST_PORT, GRAPH, SCENARIOS, SERVER, assistant_id, configurable, database  # noqa: E402
+from accounts import ACCOUNTS, FIRST_PORT, GRAPH, POSTGRES_PORT, SCENARIOS, SERVER, assistant_id, configurable, customers, database  # noqa: E402
+from records import ISSUED  # noqa: E402
 
 from world.sql import seed_sql  # noqa: E402
 
 PROJECT = "refundo-service"
-SERVE = ["uv", "run", "--with", "langgraph-cli[inmem]", "--with", "langchain-fireworks", "--with", "langchain-mcp-adapters"]
+SERVE = ["uv", "run", "--with", "langgraph-cli[inmem]","--with", "langchain-fireworks", "--with", "langchain-mcp-adapters"]
 CHAT_UI = ROOT / "service/chat-ui"
 CHAT_UI_COMMIT = "28cfb43a62b7179ed4065dd761e16ece8c29d983"  # github.com/langchain-ai/agent-chat-ui on 2026-10-07
 PNPM = ["npx", "-y", "pnpm@10"]
@@ -49,6 +52,7 @@ def compose_file() -> str:
   postgres:
     image: postgres:16-alpine
     environment: {{POSTGRES_PASSWORD: refundo}}
+    ports: ["127.0.0.1:{POSTGRES_PORT}:5432"]
     healthcheck: {{test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"], interval: 2s, timeout: 5s, retries: 30}}{servers}
 """
 
@@ -67,31 +71,39 @@ def psql(sql: str, into: str = "postgres") -> str:
 
 
 def start_records() -> None:
-    """Each account's database is made once. An account that has one keeps it, with the proposals recorded in it."""
+    """Each account's database is made once. An account that has one keeps it, with the proposals recorded in it
+    and what was issued on them."""
     compose("up", "-d", "--wait", "postgres", capture_output=True)
     have = set(psql("SELECT datname FROM pg_database").split())
     for account in ACCOUNTS:
         if database(account) not in have:
             psql(f"CREATE DATABASE {database(account)}")
             psql(seed_sql(SCENARIOS[account].world, SCENARIOS[account].request), into=database(account))
+        psql(ISSUED, into=database(account))
     compose("up", "-d", capture_output=True)
 
 
 def fetch_chat() -> None:
     """LangChain's Agent Chat UI at one commit, in service/chat-ui, which is not part of this repository, with
-    service/chat-ui.patch on top. The patch shows each tool call as one row with its result, shows submit_proposal
-    as a proposal, and reads a dollar sign as a dollar sign and not as the start of a formula."""
+    service/chat-ui.patch on top. The patch makes it the customer's chat: a sign-in step with the people in
+    accounts.SIGN_IN, the messages only, and a line that says a request is with a specialist while it waits for
+    review. With view=staff in the address it shows what support staff see: each tool call as one row with its
+    result, submit_proposal as a proposal, and the review card. It reads a dollar sign as a dollar sign and not as
+    the start of a formula."""
     if not CHAT_UI.exists():
         print("Fetching Agent Chat UI, the first time only...", flush=True)
         subprocess.run(["git", "clone", "-q", "https://github.com/langchain-ai/agent-chat-ui", str(CHAT_UI)], check=True)
     subprocess.run(["git", "checkout", "-q", "--force", CHAT_UI_COMMIT], cwd=CHAT_UI, check=True)
     subprocess.run(["git", "apply", str(ROOT / "service/chat-ui.patch")], cwd=CHAT_UI, check=True)
+    (CHAT_UI / "public").mkdir(exist_ok=True)
+    (CHAT_UI / "public/customers.json").write_text(json.dumps(customers(), indent=1))  # its sign-in step reads this
     if not (CHAT_UI / "node_modules").exists():
         subprocess.run([*PNPM, "install"], cwd=CHAT_UI, check=True, capture_output=True)
 
 
 def register_assistants() -> None:
-    """One assistant per account. An assistant that exists keeps its review setting."""
+    """One assistant per account. An assistant that exists keeps its review setting and gets the rest of its config
+    as it is written now."""
     client = get_sync_client(url=SERVER)
     for _ in range(120):
         try:
@@ -103,7 +115,10 @@ def register_assistants() -> None:
         sys.exit(f"The agent's server did not answer on {SERVER}.")
     have = {a["assistant_id"]: a for a in client.assistants.search(graph_id=GRAPH, limit=100)}
     for account in ACCOUNTS:
-        if assistant_id(account) not in have:
+        if found := have.get(assistant_id(account)):
+            review = found["config"]["configurable"]["review"]
+            client.assistants.update(assistant_id(account), graph_id=GRAPH, config={"configurable": configurable(account, review)})
+        else:
             client.assistants.create(GRAPH, assistant_id=assistant_id(account), name=account,
                                      config={"configurable": configurable(account, "all")})
 
@@ -113,19 +128,21 @@ if __name__ == "__main__":
         compose("down", "-v")
         shutil.rmtree(ROOT / "service/.langgraph_api", ignore_errors=True)  # the threads, which point at those records
         sys.exit()
-    if not (ROOT / "agents/policy.md").exists():  # evals/build.py copies it too; the agents read it from there
-        shutil.copy(ROOT / "docs/policy.md", ROOT / "agents/policy.md")
+    # The agents read the policy from agents/policy.md, a copy that evals/build.py also writes. Each start writes it
+    # again, so the served agent has the policy as it is now.
+    shutil.copy(ROOT / "docs/policy.md", ROOT / "agents/policy.md")
     fetch_chat()
     print("Starting the accounts' records...", flush=True)
     start_records()
-    env = os.environ | {"LANGSMITH_TRACING": "true" if "--trace" in sys.argv else "false", "LANGSMITH_PROJECT": "Refundo service"}
+    env = os.environ | {"LANGSMITH_TRACING": "true" if "--trace" in sys.argv else "false",
+                        "LANGSMITH_PROJECT": os.environ.get("LANGSMITH_PROJECT", "Refundo service")}
     # The server reads the paths in langgraph.json from the folder it starts in, and keeps its threads there.
     agent = subprocess.Popen([*SERVE, "langgraph", "dev", "--no-browser", "--port", "2024"], cwd=ROOT / "service", env=env)
     register_assistants()
     page = subprocess.Popen(["uv", "run", "streamlit", "run", "service/review.py", "--server.port", "8501",
                              "--server.headless", "true"], cwd=ROOT, env=env)
     chat = subprocess.Popen([*PNPM, "dev", "--port", "3000"], cwd=CHAT_UI, stdout=subprocess.DEVNULL, start_new_session=True)
-    print(f"\nThe review page: http://localhost:8501\nThe chat: opened from the review page, one link per account\n"
+    print(f"\nThe chat: http://localhost:3000\nThe review page: http://localhost:8501\n"
           f"The agent's server: {SERVER}\n", flush=True)
     try:
         while agent.poll() is None and page.poll() is None and chat.poll() is None:
