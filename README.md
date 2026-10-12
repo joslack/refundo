@@ -32,6 +32,21 @@ uv run --with matplotlib --env-file .env python evals/explore.py <commit>   # a 
 
 The dataset is all 80 scenarios. In LangSmith each one is marked hand-labeled or unlabeled, so results can be read for either group.
 
+## The results in the repository
+
+`evals/results/` has a folder for each run, named by the commit the run was made at. `evals/pareto.py` wrote each one from the run's job folders: `results.csv` has a row for each experiment and `cases.csv` a row for each trial. Every folder but the first also has `misses.csv`, with a row for each case an experiment got wrong.
+
+| Folder | The run |
+|---|---|
+| `a3dd364` | The model sweep: the `sql` agent on 8 models at every reasoning effort, 80 cases. 37 experiments |
+| `6e71349` | The agent comparison: `sql`, `structured`, `case_file` and `pipeline` on DeepSeek V4.1 Flash, GPT-6 Luna and GLM-5.3 Flash, each case 3 times. 12 experiments |
+| `83b1efc`, `4663e54`, `2327600` | The same comparison on Claude Haiku 5.5. 8 experiments, made at three later commits that changed only how an Anthropic model is called |
+| `cd9971f-long` | The 94 long accounts: `sql`, `structured` and `case_file` on DeepSeek V4.1 Flash |
+| `4b5e62d-long` | The same three agents on the long accounts, after two sentences were added to the policy |
+| `ed7bd69-long` | The `pipeline` on the long accounts, with those two sentences. Nothing a trial runs changed between `4b5e62d` and `ed7bd69` |
+
+`evals/results/judge-calibration.md` has the reply judge's numbers. Its answers are in `evals/jobs/`, which is not in the repository.
+
 ## What the answer key covers
 
 - The oracle (`world/oracle.py`) implements every decision rule in `docs/policy.md`: §3, 4, 5, 6, 9, 10 and 11. §12, which governs how replies are written, is not evaluated yet.

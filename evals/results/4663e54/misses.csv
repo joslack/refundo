@@ -1,0 +1,15 @@
+case,graph,model,effort,right,trials,expected_action,expected_amount_cents,given,models_missing_with_this_graph
+be-16,pipeline,claude-haiku-5-5,medium,2,3,escalate,8000,escalate 0 (1),claude-haiku-5-5
+be-16,structured,claude-haiku-5-5,low,2,3,escalate,8000,escalate 10000 (1),claude-haiku-5-5; claude-haiku-5-5; claude-haiku-5-5
+be-16,structured,claude-haiku-5-5,high,2,3,escalate,8000,escalate 10000 (1),claude-haiku-5-5; claude-haiku-5-5; claude-haiku-5-5
+be-16,structured,claude-haiku-5-5,xhigh,1,3,escalate,8000,escalate 10000 (2),claude-haiku-5-5; claude-haiku-5-5; claude-haiku-5-5
+be-19,pipeline,claude-haiku-5-5,medium,1,3,cash_refund,16000,cash_refund 8000 (2),claude-haiku-5-5
+be-19,structured,claude-haiku-5-5,low,0,3,cash_refund,16000,cash_refund 8000 (3),claude-haiku-5-5; claude-haiku-5-5; claude-haiku-5-5
+be-19,structured,claude-haiku-5-5,high,2,3,cash_refund,16000,cash_refund 8000 (1),claude-haiku-5-5; claude-haiku-5-5; claude-haiku-5-5
+be-19,structured,claude-haiku-5-5,xhigh,0,3,cash_refund,16000,nothing (2); cash_refund 8000 (1),claude-haiku-5-5; claude-haiku-5-5; claude-haiku-5-5
+esc-01,structured,claude-haiku-5-5,low,1,3,escalate,8000,escalate 0 (2),claude-haiku-5-5
+esc-03a,pipeline,claude-haiku-5-5,medium,2,3,deny,0,escalate 8000 (1),claude-haiku-5-5
+esc-11b,pipeline,claude-haiku-5-5,medium,1,3,escalate,8000,escalate 0 (2),claude-haiku-5-5
+esc-11b,structured,claude-haiku-5-5,low,1,3,escalate,8000,escalate 0 (2),claude-haiku-5-5; claude-haiku-5-5; claude-haiku-5-5
+esc-11b,structured,claude-haiku-5-5,high,1,3,escalate,8000,escalate 0 (2),claude-haiku-5-5; claude-haiku-5-5; claude-haiku-5-5
+esc-11b,structured,claude-haiku-5-5,xhigh,1,3,escalate,8000,escalate 0 (2),claude-haiku-5-5; claude-haiku-5-5; claude-haiku-5-5

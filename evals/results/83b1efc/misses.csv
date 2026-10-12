@@ -1,0 +1,16 @@
+case,graph,model,effort,right,trials,expected_action,expected_amount_cents,given,models_missing_with_this_graph
+an-09a,structured,claude-haiku-5-5,medium,2,3,account_credit,36666,deny 0 (1),claude-haiku-5-5
+an-09b,structured,claude-haiku-5-5,medium,2,3,deny,0,account_credit 36666 (1),claude-haiku-5-5
+an-11,sql,claude-haiku-5-5,medium,2,3,cash_refund,27000,cash_refund 29160 (1),claude-haiku-5-5
+be-16,case_file,claude-haiku-5-5,medium,2,3,escalate,8000,escalate 10000 (1),claude-haiku-5-5
+be-16,sql,claude-haiku-5-5,medium,2,3,escalate,8000,escalate 10000 (1),claude-haiku-5-5
+be-16,structured,claude-haiku-5-5,medium,0,3,escalate,8000,escalate 10000 (3),claude-haiku-5-5
+be-19,case_file,claude-haiku-5-5,medium,1,3,cash_refund,16000,cash_refund 8000 (2),claude-haiku-5-5
+be-19,sql,claude-haiku-5-5,medium,1,3,cash_refund,16000,cash_refund 8000 (2),claude-haiku-5-5
+be-19,structured,claude-haiku-5-5,medium,1,3,cash_refund,16000,cash_refund 8000 (2),claude-haiku-5-5
+esc-03a,case_file,claude-haiku-5-5,medium,2,3,deny,0,escalate 8000 (1),claude-haiku-5-5
+esc-04,structured,claude-haiku-5-5,medium,2,3,escalate,8000,escalate 0 (1),claude-haiku-5-5
+esc-06,sql,claude-haiku-5-5,medium,2,3,escalate,80000,cash_refund 80000 (1),claude-haiku-5-5
+esc-11b,case_file,claude-haiku-5-5,medium,1,3,escalate,8000,escalate 0 (2),claude-haiku-5-5
+esc-11b,structured,claude-haiku-5-5,medium,1,3,escalate,8000,escalate 0 (2),claude-haiku-5-5
+esc-12,sql,claude-haiku-5-5,medium,2,3,escalate,8000,escalate 0 (1),claude-haiku-5-5

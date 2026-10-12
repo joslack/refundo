@@ -1,0 +1,2 @@
+case,graph,model,effort,right,trials,expected_action,expected_amount_cents,given,models_missing_with_this_graph
+re-03,pipeline,deepseek-v4p1-flash,medium,0,1,escalate,28000,escalate 0 (1),deepseek-v4p1-flash
