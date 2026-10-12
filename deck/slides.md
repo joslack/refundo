@@ -575,10 +575,14 @@ The 80 cases no longer separated the agents, so each account got years of histor
 
 ## Friction log
 
+<style scoped>table { font-size: 22px; }</style>
+
 | | |
 |---|---|
-| **Harbor's LangSmith plugin** | Token and cost columns were doubled, and a rerun trial's result was lost |
-| **Annotation queues** | They hold runs and threads, not dataset examples, so labeling needed its own UI |
+| **Annotation queues** | They hold runs and threads, not cases, so labeling needed its own UI. A general tool cannot cover every way to label |
+| **A model released that day** | LangChain did not know Claude Haiku 5.5 yet and fell back to 4,096 output tokens. Anthropic's API needs a limit, and the model was a day old |
+| **Structured answers and thinking** | LangChain's default for a structured answer is a forced tool call, and Anthropic's API does not allow thinking with one. LangChain has a second method that does allow it |
+| **Harbor's LangSmith plugin** | Token and cost columns were doubled, and a rerun trial's result was lost. The plugin is Harbor's package |
 | **What worked well** | The experiment table from one plugin flag. A review step in a few lines of middleware |
 
 ---
