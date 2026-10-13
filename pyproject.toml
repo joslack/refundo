@@ -1,7 +1,7 @@
 [project]
 name = "refundo"
 version = "0.1.0"
-description = "Add your description here"
+description = "A refund agent for Quillstack, a fictional subscription software company, and the test world it is evaluated on"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
