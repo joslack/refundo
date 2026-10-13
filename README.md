@@ -10,7 +10,6 @@ A refund agent for Quillstack, a fictional subscription software company, and th
 | `agents/` | The agent implementations, one graph each, listed in `agents/langgraph.json`: `sql` reads the records with SQL, `structured` through a tool per kind of record, and `case_file` through one tool that returns the whole account. `pipeline` is a fixed graph with no agent loop: code reads the account, one model call decides, code submits. `shared.py` holds what they do the same way. They import nothing from `world/`; `tests/test_boundaries.py` enforces that |
 | `evals/` | The Harbor dataset. `environment/` defines the one environment every task runs in: the MCP server with every agent's tools, the verifier and the reference solution. `build.py` writes a small task folder per scenario, `run.py` runs them, and `langsmith_plugin.py` records each run in LangSmith with the scenario's tier, area and reference answer. `pareto.py` and `latency.py` turn a sweep's job folders into the tables and charts in `results/<commit>/`, and `explore.py` into one page for reading each experiment's measures and every case that got a wrong answer |
 | `docs/` | The refund policy and the scenario catalog |
-| `deck/` | The presentation, as Markdown slides |
 | `process/` | How the work was done: edited transcripts of the working sessions with Claude, and the labeling session transcripts |
 
 ## Commands
